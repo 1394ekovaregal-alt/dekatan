@@ -62,14 +62,14 @@ export default function SoloPhotobooth() {
   const [isGeneratingStrip, setIsGeneratingStrip] = useState(false);
   const [showFlash, setShowFlash] = useState(false);
 
-  // Template & Layout State
+  // Template & Tata Letak
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<FrameTemplate>(FRAME_TEMPLATES[0]);
   const [selectedLayout, setSelectedLayout] = useState<LayoutMode>('strip4');
   const [selectedFilter, setSelectedFilter] = useState<PhotoFilterKey>('normal');
   const [customNote, setCustomNote] = useState<string>('');
 
-  // Stiker State
+  // Stiker
   const [activeTab, setActiveTab] = useState<'filter' | 'stiker'>('filter');
   const [placedStickers, setPlacedStickers] = useState<PlacedSticker[]>([]);
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
@@ -244,7 +244,6 @@ export default function SoloPhotobooth() {
     return canvas.toDataURL('image/jpeg', 0.95);
   };
 
-  // Logika Render Kanvas dengan Dukungan Bentuk Potongan (Arch, Heart, Rounded, Rect)
   const generatePhotoStrip = useCallback(
     async (
       photos: string[],
@@ -293,11 +292,11 @@ export default function SoloPhotobooth() {
       canvas.width = stripWidth;
       canvas.height = totalHeight;
 
-      // Warna Latar Template
+      // 1. Warna Dasar Bingkai
       ctx.fillStyle = template.bg;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Gambar Lubang Klise jika tema film
+      // 2. Corak Film
       if (template.pattern === 'film') {
         ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
         const holeH = 14;
@@ -308,7 +307,7 @@ export default function SoloPhotobooth() {
         }
       }
 
-      // Render Setiap Foto dengan Bentuk Potongan (Clipping Shape)
+      // 3. Render Foto Pengguna dengan Potongan Bentuk
       for (let i = 0; i < renderPhotos.length; i++) {
         const img = new (window as any).Image();
         img.src = renderPhotos[i];
@@ -344,16 +343,12 @@ export default function SoloPhotobooth() {
         }
 
         ctx.save();
-
-        // Terapkan Jalur Potongan (Clipping Path)
         ctx.beginPath();
         if (template.slotShape === 'arch') {
-          // Bentuk Kubah Melengkung atas
           ctx.roundRect(xPos, yPos, photoWidth, photoHeight, [photoWidth / 2, photoWidth / 2, 8, 8]);
         } else if (template.slotShape === 'rounded') {
           ctx.roundRect(xPos, yPos, photoWidth, photoHeight, 16);
         } else if (template.slotShape === 'heart') {
-          // Bentuk Kasih Sayang / Hati
           const topCurveHeight = photoHeight * 0.3;
           ctx.moveTo(xPos + photoWidth / 2, yPos + photoHeight);
           ctx.bezierCurveTo(
@@ -393,18 +388,28 @@ export default function SoloPhotobooth() {
         }
         ctx.clip();
 
-        // Render Gambar + Filter
         ctx.filter = PHOTO_FILTERS[filterKey].filter;
         ctx.drawImage(img, sx, sy, sWidth, sHeight, xPos, yPos, photoWidth, photoHeight);
         ctx.restore();
 
-        // Garis Tepi Slot
         ctx.strokeStyle = template.slotBorder;
         ctx.lineWidth = 2.5;
         ctx.stroke();
       }
 
-      // Garis Pembatas Bawah
+      // 4. Tumpukan Gambar PNG Transparan (Jika Template dari Admin)
+      if ((template as any)?.overlayUrl) {
+        const overlayImg = new (window as any).Image();
+        overlayImg.crossOrigin = 'anonymous';
+        overlayImg.src = (template as any).overlayUrl;
+        await new Promise((resolve) => {
+          overlayImg.onload = resolve;
+          overlayImg.onerror = resolve;
+        });
+        ctx.drawImage(overlayImg, 0, 0, stripWidth, totalHeight);
+      }
+
+      // 5. Garis Pembatas Bawah
       const footerStartY = totalHeight - footerHeight;
       ctx.strokeStyle = template.border;
       ctx.lineWidth = 1.5;
@@ -413,12 +418,12 @@ export default function SoloPhotobooth() {
       ctx.lineTo(stripWidth - padding - 20, footerStartY + 10);
       ctx.stroke();
 
-// Logo Dekatan
+      // 6. Logo Dekatan (Otomatis Putih Bersih pada Tema Gelap)
       const darkColors = ['#18181B', '#232931', '#450A0A', '#0F172A', '#DA6868'];
       const isDarkTheme = (template as any)?.isDark || darkColors.includes(template.bg);
 
       const logoImg = new (window as any).Image();
-        logoImg.src = isDarkTheme ? '/dekatan-white.png' : '/dekatan1.png';
+      logoImg.src = '/dekatan1.png';
       await new Promise((resolve) => {
         logoImg.onload = resolve;
         logoImg.onerror = resolve;
@@ -434,16 +439,13 @@ export default function SoloPhotobooth() {
       if (logoImg.complete && logoImg.naturalWidth !== 0) {
         ctx.save();
         if (isDarkTheme) {
-          // Otomatis ubah logo menjadi putih solid pada latar gelap
           ctx.filter = 'brightness(0) invert(1)';
         }
         ctx.drawImage(logoImg, logoX, logoY, logoWidth, logoHeight);
         ctx.restore();
       }
 
-        ctx.drawImage(logoImg, logoX, logoY, logoWidth, logoHeight);
-        ctx.restore();
-      
+      // 7. Tanggal dan Teks Footer
       const now = new Date();
       const formattedDate = now.toLocaleDateString('id-ID', {
         day: 'numeric',
@@ -474,7 +476,7 @@ export default function SoloPhotobooth() {
       ctx.fillStyle = template.textColor;
       ctx.fillText(template.labelFooter || 'DEKATAN PHOTOBOOTH', stripWidth / 2, currentTextY + 20);
 
-      // Render Stiker Digital ke Kanvas
+      // 8. Stiker Digital
       if (stickersToDraw && stickersToDraw.length > 0) {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -752,7 +754,7 @@ export default function SoloPhotobooth() {
             )}
           </div>
 
-          {/* Tombol Pemicu Modal Template Fremio */}
+          {/* Tombol Pemilih Template Fremio */}
           <button
             onClick={() => setIsTemplateModalOpen(true)}
             disabled={isCapturing}
@@ -794,7 +796,7 @@ export default function SoloPhotobooth() {
         </div>
       )}
 
-      {/* Pratinjau Hasil & Pengaturan Akhir */}
+      {/* Pratinjau Hasil */}
       {finalStripUrl && (
         <div className="w-full max-w-md flex flex-col items-center animate-fade-in">
           <div className="flex items-center gap-2 text-stone-600 mb-2 text-sm font-semibold">
@@ -938,7 +940,7 @@ export default function SoloPhotobooth() {
             />
           </div>
 
-          {/* Pratinjau Kertas Strip */}
+          {/* Pratinjau Kertas Strip (Dukungan Scroll Layar Penuh) */}
           <div
             ref={previewContainerRef}
             onClick={() => setSelectedStickerId(null)}

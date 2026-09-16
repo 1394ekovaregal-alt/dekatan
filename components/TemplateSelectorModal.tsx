@@ -1,7 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Check, Sparkles, Rows, LayoutGrid } from 'lucide-react';
+import { collection, query, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 export type LayoutMode = 'strip3' | 'strip4' | 'grid';
 export type SlotShape = 'rect' | 'arch' | 'heart' | 'rounded';
@@ -18,6 +20,9 @@ export interface FrameTemplate {
   slotShape: SlotShape;
   pattern?: 'film' | 'none';
   labelFooter: string;
+  isDark?: boolean;
+  overlayUrl?: string;
+  format?: LayoutMode;
 }
 
 export const FRAME_TEMPLATES: FrameTemplate[] = [
@@ -34,6 +39,7 @@ export const FRAME_TEMPLATES: FrameTemplate[] = [
     slotShape: 'rect',
     pattern: 'film',
     labelFooter: 'DEKATAN FILM • 35MM',
+    isDark: true,
   },
   {
     id: 'retro-classic-arch',
@@ -46,6 +52,7 @@ export const FRAME_TEMPLATES: FrameTemplate[] = [
     subTextColor: '#9DA5B4',
     slotShape: 'arch',
     labelFooter: 'ARCHIVE MOMENTS',
+    isDark: true,
   },
   {
     id: 'retro-vintage-paper',
@@ -58,6 +65,7 @@ export const FRAME_TEMPLATES: FrameTemplate[] = [
     subTextColor: '#7C6A59',
     slotShape: 'rounded',
     labelFooter: 'MEMORIES • 2026',
+    isDark: false,
   },
 
   // AESTHETIC LOVE
@@ -72,6 +80,7 @@ export const FRAME_TEMPLATES: FrameTemplate[] = [
     subTextColor: '#DB2777',
     slotShape: 'heart',
     labelFooter: 'FOREVER WITH U',
+    isDark: false,
   },
   {
     id: 'love-wine-romance',
@@ -84,6 +93,7 @@ export const FRAME_TEMPLATES: FrameTemplate[] = [
     subTextColor: '#FDA4AF',
     slotShape: 'heart',
     labelFooter: 'DEKATAN LOVE STORY',
+    isDark: true,
   },
   {
     id: 'love-pastel-arch',
@@ -96,6 +106,7 @@ export const FRAME_TEMPLATES: FrameTemplate[] = [
     subTextColor: '#0284C7',
     slotShape: 'arch',
     labelFooter: 'UNDER THE SAME SKY',
+    isDark: false,
   },
 
   // CUTE & FUN
@@ -110,6 +121,7 @@ export const FRAME_TEMPLATES: FrameTemplate[] = [
     subTextColor: '#FECDD3',
     slotShape: 'rounded',
     labelFooter: 'DEKATAN PHOTOBOOTH',
+    isDark: true,
   },
   {
     id: 'cute-butter-yellow',
@@ -122,6 +134,7 @@ export const FRAME_TEMPLATES: FrameTemplate[] = [
     subTextColor: '#A16207',
     slotShape: 'rounded',
     labelFooter: 'CHEESE & SMILE! ✨',
+    isDark: false,
   },
   {
     id: 'cute-soft-lavender',
@@ -134,6 +147,7 @@ export const FRAME_TEMPLATES: FrameTemplate[] = [
     subTextColor: '#7C3AED',
     slotShape: 'heart',
     labelFooter: 'LOVELY DAY WITH YOU',
+    isDark: false,
   },
 
   // MINIMALIS
@@ -148,6 +162,7 @@ export const FRAME_TEMPLATES: FrameTemplate[] = [
     subTextColor: '#64748B',
     slotShape: 'rect',
     labelFooter: 'DEKATAN STUDIO',
+    isDark: false,
   },
   {
     id: 'minimal-warm-cream',
@@ -160,6 +175,7 @@ export const FRAME_TEMPLATES: FrameTemplate[] = [
     subTextColor: '#78716C',
     slotShape: 'rect',
     labelFooter: 'TIMELESS MEMORIES',
+    isDark: false,
   },
   {
     id: 'minimal-deep-slate',
@@ -172,6 +188,7 @@ export const FRAME_TEMPLATES: FrameTemplate[] = [
     subTextColor: '#94A3B8',
     slotShape: 'rect',
     labelFooter: 'EDISI MONOKROM',
+    isDark: true,
   },
 ];
 
@@ -193,6 +210,44 @@ export default function TemplateSelectorModal({
   onSelectTemplate,
 }: TemplateSelectorModalProps) {
   const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [customTemplates, setCustomTemplates] = useState<FrameTemplate[]>([]);
+
+  // Mengambil Template Unggahan dari Firestore secara Real-Time
+  useEffect(() => {
+    try {
+      const q = query(collection(db, 'templates'));
+      const unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const fetched: FrameTemplate[] = [];
+          snapshot.forEach((docSnap) => {
+            const d = docSnap.data();
+            fetched.push({
+              id: docSnap.id,
+              name: d.name || 'Frame Custom',
+              category: d.category || 'retro',
+              bg: d.isDark ? '#18181B' : '#FFFFFF',
+              border: '#E2E8F0',
+              slotBorder: 'transparent',
+              textColor: d.isDark ? '#FFFFFF' : '#1E293B',
+              subTextColor: '#94A3B8',
+              slotShape: 'rect',
+              labelFooter: d.name,
+              isDark: !!d.isDark,
+              overlayUrl: d.overlayUrl,
+              format: d.format,
+            });
+          });
+          setCustomTemplates(fetched);
+        },
+        (error) => {
+          console.log('Koleksi templates Firestore kosong atau belum ada:', error);
+        }
+      );
+
+      return () => unsubscribe();
+    } catch (_) {}
+  }, []);
 
   if (!isOpen) return null;
 
@@ -204,9 +259,15 @@ export default function TemplateSelectorModal({
     { id: 'minimal', label: 'Minimalis' },
   ];
 
-  const filtered = FRAME_TEMPLATES.filter(
-    (t) => activeCategory === 'all' || t.category === activeCategory
-  );
+  // Gabungkan template unggahan admin (di depan) dengan template bawaan
+  const allTemplates = [...customTemplates, ...FRAME_TEMPLATES];
+
+  const filtered = allTemplates.filter((t) => {
+    const matchesCategory = activeCategory === 'all' || t.category === activeCategory;
+    // Template bawaan menyesuaikan semua format; template custom mencocokkan format yang dipilih
+    const matchesFormat = !t.format || t.format === selectedLayout;
+    return matchesCategory && matchesFormat;
+  });
 
   const slotCount = selectedLayout === 'strip3' ? 3 : 4;
 
@@ -231,7 +292,7 @@ export default function TemplateSelectorModal({
           </button>
         </div>
 
-        {/* 1. Pengalih Tata Letak (Strip 1x3, 1x4, Grid 2x2) */}
+        {/* 1. Pengalih Tata Letak */}
         <div className="px-4 pt-3 pb-1 bg-white shrink-0">
           <div className="bg-stone-100 p-1 rounded-2xl flex gap-1">
             <button
@@ -313,51 +374,65 @@ export default function TemplateSelectorModal({
                       borderColor: tpl.border,
                     }}
                   >
-                    {tpl.pattern === 'film' && (
-                      <div className="absolute top-0 bottom-0 left-0.5 flex flex-col justify-between py-1 pointer-events-none">
-                        {[...Array(6)].map((_, i) => (
-                          <div key={i} className="w-1 h-1.5 bg-white/30 rounded-xs mb-1" />
-                        ))}
+                    {/* Jika Template Menggunakan Gambar PNG Transparan Unggahan Admin */}
+                    {tpl.overlayUrl ? (
+                      <div className="relative w-full h-full flex items-center justify-center">
+                        {/* eslint-disable-next-html-element/no-img-element */}
+                        <img
+                          src={tpl.overlayUrl}
+                          alt={tpl.name}
+                          className="w-full h-full object-contain pointer-events-none select-none"
+                        />
                       </div>
-                    )}
+                    ) : (
+                      <>
+                        {tpl.pattern === 'film' && (
+                          <div className="absolute top-0 bottom-0 left-0.5 flex flex-col justify-between py-1 pointer-events-none">
+                            {[...Array(6)].map((_, i) => (
+                              <div key={i} className="w-1 h-1.5 bg-white/30 rounded-xs mb-1" />
+                            ))}
+                          </div>
+                        )}
 
-                    <div
-                      className={`w-full flex-1 flex ${
-                        selectedLayout === 'grid' ? 'grid grid-cols-2 gap-1' : 'flex-col gap-1.5'
-                      } justify-center`}
-                    >
-                      {[...Array(slotCount)].map((_, idx) => (
                         <div
-                          key={idx}
-                          className={`w-full bg-[#DAE2F8]/80 border flex items-center justify-center shadow-inner ${
-                            tpl.slotShape === 'arch'
-                              ? 'rounded-t-full rounded-b-xs aspect-[3/4]'
-                              : tpl.slotShape === 'heart'
-                              ? 'rounded-2xl aspect-[3/4] scale-95'
-                              : tpl.slotShape === 'rounded'
-                              ? 'rounded-md aspect-[3/4]'
-                              : 'rounded-xs aspect-[3/4]'
-                          }`}
-                          style={{ borderColor: tpl.slotBorder }}
+                          className={`w-full flex-1 flex ${
+                            selectedLayout === 'grid' ? 'grid grid-cols-2 gap-1' : 'flex-col gap-1.5'
+                          } justify-center`}
                         >
-                          <span className="text-[8px] font-mono text-[#5B6B92] font-semibold">
-                            {idx + 1}
+                          {[...Array(slotCount)].map((_, idx) => (
+                            <div
+                              key={idx}
+                              className={`w-full bg-[#DAE2F8]/80 border flex items-center justify-center shadow-inner ${
+                                tpl.slotShape === 'arch'
+                                  ? 'rounded-t-full rounded-b-xs aspect-[3/4]'
+                                  : tpl.slotShape === 'heart'
+                                  ? 'rounded-2xl aspect-[3/4] scale-95'
+                                  : tpl.slotShape === 'rounded'
+                                  ? 'rounded-md aspect-[3/4]'
+                                  : 'rounded-xs aspect-[3/4]'
+                              }`}
+                              style={{ borderColor: tpl.slotBorder }}
+                            >
+                              <span className="text-[8px] font-mono text-[#5B6B92] font-semibold">
+                                {idx + 1}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="mt-2 text-center shrink-0">
+                          <span
+                            className="text-[7px] font-bold tracking-wider uppercase block truncate"
+                            style={{ color: tpl.textColor }}
+                          >
+                            {tpl.labelFooter}
                           </span>
                         </div>
-                      ))}
-                    </div>
-
-                    <div className="mt-2 text-center shrink-0">
-                      <span
-                        className="text-[7px] font-bold tracking-wider uppercase block truncate"
-                        style={{ color: tpl.textColor }}
-                      >
-                        {tpl.labelFooter}
-                      </span>
-                    </div>
+                      </>
+                    )}
 
                     {isSelected && (
-                      <div className="absolute top-1 right-1 bg-[#DA6868] text-white p-0.5 rounded-full shadow-md">
+                      <div className="absolute top-1 right-1 bg-[#DA6868] text-white p-0.5 rounded-full shadow-md z-10">
                         <Check className="w-2.5 h-2.5 stroke-[3]" />
                       </div>
                     )}

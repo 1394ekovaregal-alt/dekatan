@@ -238,7 +238,6 @@ export default function DuoPhotobooth() {
     }
   };
 
-  // Render Strip Foto Kanvas Duo Sesuai Bentuk Frame
   const generateDuoStrip = useCallback(
     async (
       photos: string[],
@@ -286,9 +285,11 @@ export default function DuoPhotobooth() {
       canvas.width = stripWidth;
       canvas.height = totalHeight;
 
+      // 1. Warna Dasar Bingkai
       ctx.fillStyle = template.bg;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+      // 2. Corak Film
       if (template.pattern === 'film') {
         ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
         const holeH = 14;
@@ -299,6 +300,7 @@ export default function DuoPhotobooth() {
         }
       }
 
+      // 3. Render Foto Berdua dengan Bentuk Potongan
       for (let i = 0; i < renderPhotos.length; i++) {
         const img = new (window as any).Image();
         img.src = renderPhotos[i];
@@ -373,6 +375,19 @@ export default function DuoPhotobooth() {
         ctx.stroke();
       }
 
+      // 4. Tumpukan Gambar PNG Transparan (Jika Template dari Admin)
+      if ((template as any)?.overlayUrl) {
+        const overlayImg = new (window as any).Image();
+        overlayImg.crossOrigin = 'anonymous';
+        overlayImg.src = (template as any).overlayUrl;
+        await new Promise((resolve) => {
+          overlayImg.onload = resolve;
+          overlayImg.onerror = resolve;
+        });
+        ctx.drawImage(overlayImg, 0, 0, stripWidth, totalHeight);
+      }
+
+      // 5. Garis Pembatas Bawah
       const footerStartY = totalHeight - footerHeight;
       ctx.strokeStyle = template.border;
       ctx.lineWidth = 1.5;
@@ -380,6 +395,10 @@ export default function DuoPhotobooth() {
       ctx.moveTo(padding + 20, footerStartY + 10);
       ctx.lineTo(stripWidth - padding - 20, footerStartY + 10);
       ctx.stroke();
+
+      // 6. Logo Dekatan (Otomatis Putih Bersih pada Tema Gelap)
+      const darkColors = ['#18181B', '#232931', '#450A0A', '#0F172A', '#DA6868'];
+      const isDarkTheme = (template as any)?.isDark || darkColors.includes(template.bg);
 
       const logoImg = new (window as any).Image();
       logoImg.src = '/dekatan1.png';
@@ -396,9 +415,15 @@ export default function DuoPhotobooth() {
       const logoY = footerStartY + 25;
 
       if (logoImg.complete && logoImg.naturalWidth !== 0) {
+        ctx.save();
+        if (isDarkTheme) {
+          ctx.filter = 'brightness(0) invert(1)';
+        }
         ctx.drawImage(logoImg, logoX, logoY, logoWidth, logoHeight);
+        ctx.restore();
       }
 
+      // 7. Tanggal & Teks Footer
       const now = new Date();
       const formattedDate = now.toLocaleDateString('id-ID', {
         day: 'numeric',
@@ -508,7 +533,7 @@ export default function DuoPhotobooth() {
     );
   }, [initAudio, playBeepSound, playShutterSound, generateDuoStrip]);
 
-  // Sinkronisasi Sinyal Dua Arah
+  // Sinkronisasi Sinyal Dua Arah Antar-Perangkat
   const setupDataConnection = useCallback(
     (conn: DataConnection) => {
       conn.on('open', () => {
@@ -534,20 +559,17 @@ export default function DuoPhotobooth() {
               data.layout
             );
           }
-        } else if (data?.type === 'TEMPLATE_CHANGE' && data?.templateId) {
-          const found = FRAME_TEMPLATES.find((t) => t.id === data.templateId);
-          if (found) {
-            setSelectedTemplate(found);
-            selectedTemplateRef.current = found;
-            if (capturedPhotosRef.current.length > 0) {
-              generateDuoStrip(
-                capturedPhotosRef.current,
-                found,
-                selectedFilterRef.current,
-                customNoteRef.current,
-                selectedLayoutRef.current
-              );
-            }
+        } else if (data?.type === 'TEMPLATE_CHANGE' && data?.template) {
+          setSelectedTemplate(data.template);
+          selectedTemplateRef.current = data.template;
+          if (capturedPhotosRef.current.length > 0) {
+            generateDuoStrip(
+              capturedPhotosRef.current,
+              data.template,
+              selectedFilterRef.current,
+              customNoteRef.current,
+              selectedLayoutRef.current
+            );
           }
         } else if (data?.type === 'FILTER_CHANGE' && data?.filter) {
           setSelectedFilter(data.filter);
@@ -688,7 +710,7 @@ export default function DuoPhotobooth() {
       generateDuoStrip(capturedPhotos, tpl, selectedFilter, customNote, selectedLayout);
     }
     if (connRef.current) {
-      connRef.current.send({ type: 'TEMPLATE_CHANGE', templateId: tpl.id });
+      connRef.current.send({ type: 'TEMPLATE_CHANGE', template: tpl });
     }
   };
 
@@ -822,7 +844,7 @@ export default function DuoPhotobooth() {
         </div>
       )}
 
-      {/* Tahap 2: Live Camera & Pilihan Frame Fremio */}
+      {/* Tahap 2: Live Camera & Pilihan Frame */}
       {!finalStripUrl && (
         <div className="w-full max-w-md flex flex-col items-center">
           <div className="relative w-full aspect-[4/3] bg-stone-900 rounded-3xl overflow-hidden shadow-xl border-4 border-white grid grid-cols-2 divide-x-2 divide-white/40">
@@ -898,7 +920,6 @@ export default function DuoPhotobooth() {
             </button>
           </div>
 
-          {/* Tombol Pemilih Template Fremio Berdua */}
           {isConnected && !isCapturing && (
             <button
               onClick={() => setIsTemplateModalOpen(true)}
