@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Camera, RefreshCw, Download, ArrowLeft, Sparkles } from 'lucide-react';
+import { Camera, RefreshCw, Download, ArrowLeft, Sparkles, LayoutGrid, Rows } from 'lucide-react';
 
 const FRAME_THEMES = {
   white: {
@@ -72,6 +72,7 @@ export default function SoloPhotobooth() {
 
   const [selectedTheme, setSelectedTheme] = useState<FrameThemeKey>('white');
   const [selectedFilter, setSelectedFilter] = useState<PhotoFilterKey>('normal');
+  const [selectedLayout, setSelectedLayout] = useState<'strip' | 'grid'>('strip');
   const [customNote, setCustomNote] = useState<string>('');
 
   const initAudio = useCallback(() => {
@@ -264,7 +265,8 @@ export default function SoloPhotobooth() {
       photos: string[],
       themeKey: FrameThemeKey = selectedTheme,
       filterKey: PhotoFilterKey = selectedFilter,
-      note: string = customNote
+      note: string = customNote,
+      layout: 'strip' | 'grid' = selectedLayout
     ) => {
       setIsGeneratingStrip(true);
 
@@ -273,15 +275,28 @@ export default function SoloPhotobooth() {
       if (!ctx) return;
 
       const theme = FRAME_THEMES[themeKey];
+      const isGrid = layout === 'grid';
 
-      const stripWidth = 560;
       const padding = 32;
-      const spacing = 20;
-      const photoWidth = stripWidth - padding * 2;
-      const photoHeight = Math.round(photoWidth * (4 / 3));
-      const footerHeight = note.trim() ? 245 : 210;
+      const spacing = 18;
+      const footerHeight = note.trim() ? 235 : 195;
 
-      const totalHeight = padding * 2 + photoHeight * 4 + spacing * 3 + footerHeight;
+      let stripWidth = 560;
+      let photoWidth = 0;
+      let photoHeight = 0;
+      let totalHeight = 0;
+
+      if (isGrid) {
+        stripWidth = 640;
+        photoWidth = Math.round((stripWidth - padding * 2 - spacing) / 2);
+        photoHeight = Math.round(photoWidth * (4 / 3));
+        totalHeight = padding * 2 + photoHeight * 2 + spacing + footerHeight;
+      } else {
+        stripWidth = 560;
+        photoWidth = stripWidth - padding * 2;
+        photoHeight = Math.round(photoWidth * (4 / 3));
+        totalHeight = padding * 2 + photoHeight * 4 + spacing * 3 + footerHeight;
+      }
 
       canvas.width = stripWidth;
       canvas.height = totalHeight;
@@ -296,7 +311,18 @@ export default function SoloPhotobooth() {
           img.onload = resolve;
         });
 
-        const yPos = padding + i * (photoHeight + spacing);
+        let xPos = padding;
+        let yPos = padding;
+
+        if (isGrid) {
+          const col = i % 2;
+          const row = Math.floor(i / 2);
+          xPos = padding + col * (photoWidth + spacing);
+          yPos = padding + row * (photoHeight + spacing);
+        } else {
+          yPos = padding + i * (photoHeight + spacing);
+        }
+
         const imgRatio = img.width / img.height;
         const targetRatio = photoWidth / photoHeight;
 
@@ -315,12 +341,12 @@ export default function SoloPhotobooth() {
 
         ctx.save();
         ctx.filter = PHOTO_FILTERS[filterKey].filter;
-        ctx.drawImage(img, sx, sy, sWidth, sHeight, padding, yPos, photoWidth, photoHeight);
+        ctx.drawImage(img, sx, sy, sWidth, sHeight, xPos, yPos, photoWidth, photoHeight);
         ctx.restore();
 
         ctx.strokeStyle = theme.border;
         ctx.lineWidth = 2;
-        ctx.strokeRect(padding, yPos, photoWidth, photoHeight);
+        ctx.strokeRect(xPos, yPos, photoWidth, photoHeight);
       }
 
       const footerStartY = totalHeight - footerHeight;
@@ -378,14 +404,18 @@ export default function SoloPhotobooth() {
 
       ctx.font = '12px sans-serif';
       ctx.fillStyle = theme.editionText;
-      ctx.fillText('Solo Photobooth • Edisi Mandiri', stripWidth / 2, currentTextY + 20);
+      ctx.fillText(
+        isGrid ? 'Solo Photobooth • Edisi Grid (2×2)' : 'Solo Photobooth • Edisi Strip (1×4)',
+        stripWidth / 2,
+        currentTextY + 20
+      );
 
       const dataUrl = canvas.toDataURL('image/png');
       setFinalStripUrl(dataUrl);
       setIsGeneratingStrip(false);
       stopCamera();
     },
-    [selectedTheme, selectedFilter, customNote, stopCamera]
+    [selectedTheme, selectedFilter, customNote, selectedLayout, stopCamera]
   );
 
   const startPhotoSession = async () => {
@@ -420,34 +450,41 @@ export default function SoloPhotobooth() {
     }
 
     setIsCapturing(false);
-    generatePhotoStrip(tempPhotos, selectedTheme, selectedFilter, customNote);
+    generatePhotoStrip(tempPhotos, selectedTheme, selectedFilter, customNote, selectedLayout);
   };
 
   const handleThemeChange = (newTheme: FrameThemeKey) => {
     setSelectedTheme(newTheme);
     if (capturedPhotos.length > 0) {
-      generatePhotoStrip(capturedPhotos, newTheme, selectedFilter, customNote);
+      generatePhotoStrip(capturedPhotos, newTheme, selectedFilter, customNote, selectedLayout);
     }
   };
 
   const handleFilterChange = (newFilter: PhotoFilterKey) => {
     setSelectedFilter(newFilter);
     if (capturedPhotos.length > 0) {
-      generatePhotoStrip(capturedPhotos, selectedTheme, newFilter, customNote);
+      generatePhotoStrip(capturedPhotos, selectedTheme, newFilter, customNote, selectedLayout);
+    }
+  };
+
+  const handleLayoutChange = (newLayout: 'strip' | 'grid') => {
+    setSelectedLayout(newLayout);
+    if (capturedPhotos.length > 0) {
+      generatePhotoStrip(capturedPhotos, selectedTheme, selectedFilter, customNote, newLayout);
     }
   };
 
   const handleNoteChange = (text: string) => {
     setCustomNote(text);
     if (capturedPhotos.length > 0) {
-      generatePhotoStrip(capturedPhotos, selectedTheme, selectedFilter, text);
+      generatePhotoStrip(capturedPhotos, selectedTheme, selectedFilter, text, selectedLayout);
     }
   };
 
   const handleDownload = async () => {
     if (!finalStripUrl) return;
 
-    const fileName = `dekatan-solo-${selectedTheme}-${Date.now()}.png`;
+    const fileName = `dekatan-solo-${selectedLayout}-${selectedTheme}-${Date.now()}.png`;
 
     try {
       const response = await fetch(finalStripUrl);
@@ -487,7 +524,7 @@ export default function SoloPhotobooth() {
           className="inline-flex items-center gap-1.5 text-xs md:text-sm font-medium text-slate-600 hover:text-[#DA6868] transition"
         >
           <ArrowLeft className="w-4 h-4" />
-          Kembali
+          Kembali ke Beranda
         </Link>
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 md:w-11 md:h-11 relative shrink-0 rounded-xl overflow-hidden shadow-xs">
@@ -570,7 +607,7 @@ export default function SoloPhotobooth() {
               {isCapturing
                 ? `Mengambil Foto (${currentShot}/4)...`
                 : isGeneratingStrip
-                ? 'Menyusun Strip Foto...'
+                ? 'Menyusun Foto...'
                 : 'Mulai Foto (4 Jepretan)'}
             </button>
             <p className="text-center text-xs text-slate-500 mt-2.5">
@@ -584,9 +621,37 @@ export default function SoloPhotobooth() {
         <div className="w-full max-w-md flex flex-col items-center animate-fade-in">
           <div className="flex items-center gap-2 text-stone-600 mb-2.5 text-sm font-semibold">
             <Sparkles className="w-4 h-4 text-[#DA6868]" />
-            Strip Fotomu Sudah Jadi!
+            Hasil Fotomu Sudah Jadi!
           </div>
 
+          {/* PEMILIH TATA LETAK: STRIP ATAU GRID */}
+          <div className="flex items-center gap-2 mb-2.5 bg-white px-3.5 py-1.5 rounded-2xl shadow-xs border border-stone-200">
+            <span className="text-xs font-semibold text-stone-500 mr-1">Tata Letak:</span>
+            <button
+              onClick={() => handleLayoutChange('strip')}
+              className={`px-3 py-1 rounded-xl text-xs font-medium flex items-center gap-1.5 touch-manipulation transition ${
+                selectedLayout === 'strip'
+                  ? 'bg-[#DA6868] text-white shadow-xs'
+                  : 'text-stone-600 hover:bg-stone-100'
+              }`}
+            >
+              <Rows className="w-3.5 h-3.5" />
+              Strip (1×4)
+            </button>
+            <button
+              onClick={() => handleLayoutChange('grid')}
+              className={`px-3 py-1 rounded-xl text-xs font-medium flex items-center gap-1.5 touch-manipulation transition ${
+                selectedLayout === 'grid'
+                  ? 'bg-[#DA6868] text-white shadow-xs'
+                  : 'text-stone-600 hover:bg-stone-100'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              Grid (2×2)
+            </button>
+          </div>
+
+          {/* PEMILIH FILTER */}
           <div className="flex items-center gap-1.5 mb-2.5 bg-white px-3 py-1.5 rounded-2xl shadow-xs border border-stone-200">
             <span className="text-xs font-semibold text-stone-500 mr-1.5">Filter:</span>
             {(Object.keys(PHOTO_FILTERS) as PhotoFilterKey[]).map((key) => {
@@ -608,6 +673,7 @@ export default function SoloPhotobooth() {
             })}
           </div>
 
+          {/* PEMILIH WARNA BINGKAI */}
           <div className="flex items-center gap-3 mb-3 bg-white px-4 py-2 rounded-2xl shadow-xs border border-stone-200">
             <span className="text-xs font-semibold text-stone-500 mr-1">Warna:</span>
             {(Object.keys(FRAME_THEMES) as FrameThemeKey[]).map((key) => {
@@ -629,6 +695,7 @@ export default function SoloPhotobooth() {
             })}
           </div>
 
+          {/* INPUT PESAN PRIBADI */}
           <div className="w-full bg-white p-3 rounded-2xl shadow-xs border border-stone-200 mb-4">
             <label className="block text-xs font-semibold text-stone-600 mb-1.5">
               Pesan Pribadi / Catatan Singkat:
@@ -647,7 +714,12 @@ export default function SoloPhotobooth() {
             </div>
           </div>
 
-          <div className="p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 max-w-[280px]">
+          {/* PRATINJAU KANVAS */}
+          <div
+            className={`p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 ${
+              selectedLayout === 'grid' ? 'max-w-[320px]' : 'max-w-[270px]'
+            }`}
+          >
             {/* eslint-disable-next-html-element/no-img-element */}
             <img
               src={finalStripUrl}
@@ -662,7 +734,7 @@ export default function SoloPhotobooth() {
               className="w-full py-3.5 bg-[#DA6868] text-white font-bold rounded-xl shadow-md hover:bg-[#c85656] active:scale-95 touch-manipulation flex items-center justify-center gap-2 transition"
             >
               <Download className="w-5 h-5" />
-              Simpan / Bagikan Foto Strip
+              Simpan / Bagikan Foto ({selectedLayout === 'grid' ? 'Grid 2×2' : 'Strip 1×4'})
             </button>
 
             <button

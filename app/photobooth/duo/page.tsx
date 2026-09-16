@@ -3,7 +3,20 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Camera, RefreshCw, Download, ArrowLeft, Sparkles, Copy, Check, Users, Mic, MicOff } from 'lucide-react';
+import {
+  Camera,
+  RefreshCw,
+  Download,
+  ArrowLeft,
+  Sparkles,
+  Copy,
+  Check,
+  Users,
+  Mic,
+  MicOff,
+  LayoutGrid,
+  Rows,
+} from 'lucide-react';
 import type { DataConnection, MediaConnection } from 'peerjs';
 
 const FRAME_THEMES = {
@@ -90,6 +103,9 @@ export default function DuoPhotobooth() {
   const [selectedFilter, setSelectedFilter] = useState<PhotoFilterKey>('normal');
   const selectedFilterRef = useRef<PhotoFilterKey>('normal');
 
+  const [selectedLayout, setSelectedLayout] = useState<'strip' | 'grid'>('strip');
+  const selectedLayoutRef = useRef<'strip' | 'grid'>('strip');
+
   const [customNote, setCustomNote] = useState<string>('');
   const customNoteRef = useRef<string>('');
 
@@ -104,6 +120,10 @@ export default function DuoPhotobooth() {
   useEffect(() => {
     selectedFilterRef.current = selectedFilter;
   }, [selectedFilter]);
+
+  useEffect(() => {
+    selectedLayoutRef.current = selectedLayout;
+  }, [selectedLayout]);
 
   useEffect(() => {
     customNoteRef.current = customNote;
@@ -271,7 +291,8 @@ export default function DuoPhotobooth() {
       photos: string[],
       themeKey: FrameThemeKey = selectedThemeRef.current,
       filterKey: PhotoFilterKey = selectedFilterRef.current,
-      note: string = customNoteRef.current
+      note: string = customNoteRef.current,
+      layout: 'strip' | 'grid' = selectedLayoutRef.current
     ) => {
       setIsGeneratingStrip(true);
 
@@ -280,15 +301,28 @@ export default function DuoPhotobooth() {
       if (!ctx) return;
 
       const theme = FRAME_THEMES[themeKey];
+      const isGrid = layout === 'grid';
 
-      const stripWidth = 560;
       const padding = 32;
-      const spacing = 20;
-      const photoWidth = stripWidth - padding * 2;
-      const photoHeight = Math.round(photoWidth * (3 / 4));
-      const footerHeight = note.trim() ? 245 : 210;
+      const spacing = 18;
+      const footerHeight = note.trim() ? 235 : 195;
 
-      const totalHeight = padding * 2 + photoHeight * 4 + spacing * 3 + footerHeight;
+      let stripWidth = 560;
+      let photoWidth = 0;
+      let photoHeight = 0;
+      let totalHeight = 0;
+
+      if (isGrid) {
+        stripWidth = 640;
+        photoWidth = Math.round((stripWidth - padding * 2 - spacing) / 2);
+        photoHeight = Math.round(photoWidth * (3 / 4));
+        totalHeight = padding * 2 + photoHeight * 2 + spacing + footerHeight;
+      } else {
+        stripWidth = 560;
+        photoWidth = stripWidth - padding * 2;
+        photoHeight = Math.round(photoWidth * (3 / 4));
+        totalHeight = padding * 2 + photoHeight * 4 + spacing * 3 + footerHeight;
+      }
 
       canvas.width = stripWidth;
       canvas.height = totalHeight;
@@ -303,16 +337,26 @@ export default function DuoPhotobooth() {
           img.onload = resolve;
         });
 
-        const yPos = padding + i * (photoHeight + spacing);
+        let xPos = padding;
+        let yPos = padding;
+
+        if (isGrid) {
+          const col = i % 2;
+          const row = Math.floor(i / 2);
+          xPos = padding + col * (photoWidth + spacing);
+          yPos = padding + row * (photoHeight + spacing);
+        } else {
+          yPos = padding + i * (photoHeight + spacing);
+        }
 
         ctx.save();
         ctx.filter = PHOTO_FILTERS[filterKey].filter;
-        ctx.drawImage(img, padding, yPos, photoWidth, photoHeight);
+        ctx.drawImage(img, xPos, yPos, photoWidth, photoHeight);
         ctx.restore();
 
         ctx.strokeStyle = theme.border;
         ctx.lineWidth = 2;
-        ctx.strokeRect(padding, yPos, photoWidth, photoHeight);
+        ctx.strokeRect(xPos, yPos, photoWidth, photoHeight);
       }
 
       const footerStartY = totalHeight - footerHeight;
@@ -370,7 +414,11 @@ export default function DuoPhotobooth() {
 
       ctx.font = '12px sans-serif';
       ctx.fillStyle = theme.editionText;
-      ctx.fillText('Duo Photobooth • Bersama Pasangan', stripWidth / 2, currentTextY + 20);
+      ctx.fillText(
+        isGrid ? 'Duo Photobooth • Edisi Grid (2×2)' : 'Duo Photobooth • Edisi Strip (1×4)',
+        stripWidth / 2,
+        currentTextY + 20
+      );
 
       const dataUrl = canvas.toDataURL('image/png');
       setFinalStripUrl(dataUrl);
@@ -446,7 +494,8 @@ export default function DuoPhotobooth() {
       tempPhotos,
       selectedThemeRef.current,
       selectedFilterRef.current,
-      customNoteRef.current
+      customNoteRef.current,
+      selectedLayoutRef.current
     );
   }, [initAudio, playBeepSound, playShutterSound, generateDuoStrip]);
 
@@ -468,7 +517,8 @@ export default function DuoPhotobooth() {
               capturedPhotosRef.current,
               data.theme,
               selectedFilterRef.current,
-              customNoteRef.current
+              customNoteRef.current,
+              selectedLayoutRef.current
             );
           }
         } else if (data?.type === 'FILTER_CHANGE' && data?.filter) {
@@ -479,7 +529,23 @@ export default function DuoPhotobooth() {
               capturedPhotosRef.current,
               selectedThemeRef.current,
               data.filter,
-              customNoteRef.current
+              customNoteRef.current,
+              selectedLayoutRef.current
+            );
+          }
+        } else if (
+          data?.type === 'LAYOUT_CHANGE' &&
+          (data?.layout === 'strip' || data?.layout === 'grid')
+        ) {
+          setSelectedLayout(data.layout);
+          selectedLayoutRef.current = data.layout;
+          if (capturedPhotosRef.current.length > 0) {
+            generateDuoStrip(
+              capturedPhotosRef.current,
+              selectedThemeRef.current,
+              selectedFilterRef.current,
+              customNoteRef.current,
+              data.layout
             );
           }
         } else if (data?.type === 'NOTE_CHANGE' && typeof data?.note === 'string') {
@@ -490,7 +556,8 @@ export default function DuoPhotobooth() {
               capturedPhotosRef.current,
               selectedThemeRef.current,
               selectedFilterRef.current,
-              data.note
+              data.note,
+              selectedLayoutRef.current
             );
           }
         }
@@ -603,7 +670,7 @@ export default function DuoPhotobooth() {
     setSelectedTheme(newTheme);
     selectedThemeRef.current = newTheme;
     if (capturedPhotos.length > 0) {
-      generateDuoStrip(capturedPhotos, newTheme, selectedFilter, customNote);
+      generateDuoStrip(capturedPhotos, newTheme, selectedFilter, customNote, selectedLayout);
     }
     if (connRef.current) {
       connRef.current.send({ type: 'THEME_CHANGE', theme: newTheme });
@@ -614,10 +681,21 @@ export default function DuoPhotobooth() {
     setSelectedFilter(newFilter);
     selectedFilterRef.current = newFilter;
     if (capturedPhotos.length > 0) {
-      generateDuoStrip(capturedPhotos, selectedTheme, newFilter, customNote);
+      generateDuoStrip(capturedPhotos, selectedTheme, newFilter, customNote, selectedLayout);
     }
     if (connRef.current) {
       connRef.current.send({ type: 'FILTER_CHANGE', filter: newFilter });
+    }
+  };
+
+  const handleLayoutChange = (newLayout: 'strip' | 'grid') => {
+    setSelectedLayout(newLayout);
+    selectedLayoutRef.current = newLayout;
+    if (capturedPhotos.length > 0) {
+      generateDuoStrip(capturedPhotos, selectedTheme, selectedFilter, customNote, newLayout);
+    }
+    if (connRef.current) {
+      connRef.current.send({ type: 'LAYOUT_CHANGE', layout: newLayout });
     }
   };
 
@@ -625,7 +703,7 @@ export default function DuoPhotobooth() {
     setCustomNote(text);
     customNoteRef.current = text;
     if (capturedPhotos.length > 0) {
-      generateDuoStrip(capturedPhotos, selectedTheme, selectedFilter, text);
+      generateDuoStrip(capturedPhotos, selectedTheme, selectedFilter, text, selectedLayout);
     }
     if (connRef.current) {
       connRef.current.send({ type: 'NOTE_CHANGE', note: text });
@@ -635,7 +713,7 @@ export default function DuoPhotobooth() {
   const handleDownload = async () => {
     if (!finalStripUrl) return;
 
-    const fileName = `dekatan-duo-${selectedTheme}-${Date.now()}.png`;
+    const fileName = `dekatan-duo-${selectedLayout}-${selectedTheme}-${Date.now()}.png`;
 
     try {
       const response = await fetch(finalStripUrl);
@@ -674,7 +752,7 @@ export default function DuoPhotobooth() {
           className="inline-flex items-center gap-1.5 text-xs md:text-sm font-medium text-slate-600 hover:text-[#DA6868] transition"
         >
           <ArrowLeft className="w-4 h-4" />
-          Kembali
+          Kembali ke Beranda
         </Link>
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 md:w-11 md:h-11 relative shrink-0 rounded-xl overflow-hidden shadow-xs">
@@ -826,7 +904,7 @@ export default function DuoPhotobooth() {
               {isCapturing
                 ? `Mengambil Foto Bersama (${currentShot}/4)...`
                 : isGeneratingStrip
-                ? 'Menyusun Strip Foto Berdua...'
+                ? 'Menyusun Foto...'
                 : isConnected
                 ? 'Mulai Foto Berdua (4 Jepretan)'
                 : 'Tunggu Pasangan Tersambung'}
@@ -842,9 +920,40 @@ export default function DuoPhotobooth() {
         <div className="w-full max-w-md flex flex-col items-center animate-fade-in">
           <div className="flex items-center gap-2 text-stone-600 mb-2.5 text-sm font-semibold">
             <Sparkles className="w-4 h-4 text-[#DA6868]" />
-            Strip Foto Berdua Sudah Jadi!
+            Hasil Foto Berdua Sudah Jadi!
           </div>
 
+          {/* PEMILIH TATA LETAK DUO: STRIP ATAU GRID */}
+          <div className="flex items-center gap-2 mb-2.5 bg-white px-3.5 py-1.5 rounded-2xl shadow-xs border border-stone-200">
+            <span className="text-xs font-semibold text-stone-500 mr-1">Tata Letak:</span>
+            <button
+              onClick={() => handleLayoutChange('strip')}
+              className={`px-3 py-1 rounded-xl text-xs font-medium flex items-center gap-1.5 touch-manipulation transition ${
+                selectedLayout === 'strip'
+                  ? 'bg-[#DA6868] text-white shadow-xs'
+                  : 'text-stone-600 hover:bg-stone-100'
+              }`}
+            >
+              <Rows className="w-3.5 h-3.5" />
+              Strip (1×4)
+            </button>
+            <button
+              onClick={() => handleLayoutChange('grid')}
+              className={`px-3 py-1 rounded-xl text-xs font-medium flex items-center gap-1.5 touch-manipulation transition ${
+                selectedLayout === 'grid'
+                  ? 'bg-[#DA6868] text-white shadow-xs'
+                  : 'text-stone-600 hover:bg-stone-100'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              Grid (2×2)
+            </button>
+            <span className="text-[10px] bg-rose-50 text-[#DA6868] px-2 py-0.5 rounded-full font-medium border border-rose-100 ml-auto">
+              Tersinkron
+            </span>
+          </div>
+
+          {/* PEMILIH FILTER */}
           <div className="flex items-center gap-1.5 mb-2.5 bg-white px-3 py-1.5 rounded-2xl shadow-xs border border-stone-200">
             <span className="text-xs font-semibold text-stone-500 mr-1.5">Filter:</span>
             {(Object.keys(PHOTO_FILTERS) as PhotoFilterKey[]).map((key) => {
@@ -866,6 +975,7 @@ export default function DuoPhotobooth() {
             })}
           </div>
 
+          {/* PEMILIH WARNA BINGKAI */}
           <div className="flex items-center gap-3 mb-3 bg-white px-4 py-2 rounded-2xl shadow-xs border border-stone-200">
             <span className="text-xs font-semibold text-stone-500 mr-1">Warna:</span>
             {(Object.keys(FRAME_THEMES) as FrameThemeKey[]).map((key) => {
@@ -885,6 +995,7 @@ export default function DuoPhotobooth() {
             })}
           </div>
 
+          {/* INPUT PESAN PRIBADI */}
           <div className="w-full bg-white p-3 rounded-2xl shadow-xs border border-stone-200 mb-4">
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs font-semibold text-stone-600">
@@ -908,7 +1019,12 @@ export default function DuoPhotobooth() {
             </div>
           </div>
 
-          <div className="p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 max-w-[280px]">
+          {/* PRATINJAU KANVAS */}
+          <div
+            className={`p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 ${
+              selectedLayout === 'grid' ? 'max-w-[320px]' : 'max-w-[270px]'
+            }`}
+          >
             {/* eslint-disable-next-html-element/no-img-element */}
             <img src={finalStripUrl} alt="Hasil Photobooth Berdua" className="w-full h-auto rounded-lg shadow-inner" />
           </div>
@@ -919,7 +1035,7 @@ export default function DuoPhotobooth() {
               className="w-full py-3.5 bg-[#DA6868] text-white font-bold rounded-xl shadow-md hover:bg-[#c85656] active:scale-95 touch-manipulation flex items-center justify-center gap-2 transition"
             >
               <Download className="w-5 h-5" />
-              Simpan / Bagikan Foto Strip
+              Simpan / Bagikan Foto ({selectedLayout === 'grid' ? 'Grid 2×2' : 'Strip 1×4'})
             </button>
 
             <button
