@@ -3,7 +3,18 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Camera, RefreshCw, Download, ArrowLeft, Sparkles, LayoutGrid, Rows } from 'lucide-react';
+import {
+  Camera,
+  RefreshCw,
+  Download,
+  ArrowLeft,
+  Sparkles,
+  LayoutGrid,
+  Rows,
+  Smile,
+  SlidersHorizontal,
+  X,
+} from 'lucide-react';
 
 const FRAME_THEMES = {
   white: {
@@ -56,10 +67,24 @@ const PHOTO_FILTERS = {
 type PhotoFilterKey = keyof typeof PHOTO_FILTERS;
 type LayoutMode = 'strip4' | 'strip3' | 'grid';
 
+const AVAILABLE_STICKERS = [
+  '❤️', '💖', '✨', '🎀', '🧸', '🌸',
+  '👑', '⭐', '💌', '🐱', '🍒', '🍓',
+  '☁️', '🔥', '😎', '🍀', '🌼', '🎂',
+];
+
+interface PlacedSticker {
+  id: string;
+  emoji: string;
+  x: number; // Persentase koordinat (0 - 100%)
+  y: number; // Persentase koordinat (0 - 100%)
+}
+
 export default function SoloPhotobooth() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const previewContainerRef = useRef<HTMLDivElement | null>(null);
 
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -75,6 +100,11 @@ export default function SoloPhotobooth() {
   const [selectedFilter, setSelectedFilter] = useState<PhotoFilterKey>('normal');
   const [selectedLayout, setSelectedLayout] = useState<LayoutMode>('strip4');
   const [customNote, setCustomNote] = useState<string>('');
+
+  // Tab Pengaturan & Stiker
+  const [activeTab, setActiveTab] = useState<'filter' | 'stiker'>('filter');
+  const [placedStickers, setPlacedStickers] = useState<PlacedSticker[]>([]);
+  const [activeDraggingId, setActiveDraggingId] = useState<string | null>(null);
 
   const initAudio = useCallback(() => {
     if (!audioCtxRef.current) {
@@ -267,7 +297,8 @@ export default function SoloPhotobooth() {
       themeKey: FrameThemeKey = selectedTheme,
       filterKey: PhotoFilterKey = selectedFilter,
       note: string = customNote,
-      layout: LayoutMode = selectedLayout
+      layout: LayoutMode = selectedLayout,
+      stickersToDraw: PlacedSticker[] = placedStickers
     ) => {
       setIsGeneratingStrip(true);
 
@@ -302,7 +333,6 @@ export default function SoloPhotobooth() {
         photoHeight = Math.round(photoWidth * (4 / 3));
         totalHeight = padding * 2 + photoHeight * 3 + spacing * 2 + footerHeight;
       } else {
-        // Default strip4 (1x4)
         stripWidth = 560;
         photoWidth = stripWidth - padding * 2;
         photoHeight = Math.round(photoWidth * (4 / 3));
@@ -425,12 +455,24 @@ export default function SoloPhotobooth() {
         currentTextY + 20
       );
 
+      // CETAK STIKER DIGITAL KE ATAS KANVAS
+      if (stickersToDraw && stickersToDraw.length > 0) {
+        ctx.font = '36px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        for (const stk of stickersToDraw) {
+          const pixelX = (stk.x / 100) * stripWidth;
+          const pixelY = (stk.y / 100) * totalHeight;
+          ctx.fillText(stk.emoji, pixelX, pixelY);
+        }
+      }
+
       const dataUrl = canvas.toDataURL('image/png');
       setFinalStripUrl(dataUrl);
       setIsGeneratingStrip(false);
       stopCamera();
     },
-    [selectedTheme, selectedFilter, customNote, selectedLayout, stopCamera]
+    [selectedTheme, selectedFilter, customNote, selectedLayout, placedStickers, stopCamera]
   );
 
   const startPhotoSession = async () => {
@@ -438,6 +480,7 @@ export default function SoloPhotobooth() {
     setIsCapturing(true);
     setCapturedPhotos([]);
     setFinalStripUrl(null);
+    setPlacedStickers([]);
 
     const tempPhotos: string[] = [];
 
@@ -465,43 +508,96 @@ export default function SoloPhotobooth() {
     }
 
     setIsCapturing(false);
-    generatePhotoStrip(tempPhotos, selectedTheme, selectedFilter, customNote, selectedLayout);
+    generatePhotoStrip(tempPhotos, selectedTheme, selectedFilter, customNote, selectedLayout, []);
   };
 
   const handleThemeChange = (newTheme: FrameThemeKey) => {
     setSelectedTheme(newTheme);
     if (capturedPhotos.length > 0) {
-      generatePhotoStrip(capturedPhotos, newTheme, selectedFilter, customNote, selectedLayout);
+      generatePhotoStrip(capturedPhotos, newTheme, selectedFilter, customNote, selectedLayout, placedStickers);
     }
   };
 
   const handleFilterChange = (newFilter: PhotoFilterKey) => {
     setSelectedFilter(newFilter);
     if (capturedPhotos.length > 0) {
-      generatePhotoStrip(capturedPhotos, selectedTheme, newFilter, customNote, selectedLayout);
+      generatePhotoStrip(capturedPhotos, selectedTheme, newFilter, customNote, selectedLayout, placedStickers);
     }
   };
 
   const handleLayoutChange = (newLayout: LayoutMode) => {
     setSelectedLayout(newLayout);
     if (capturedPhotos.length > 0) {
-      generatePhotoStrip(capturedPhotos, selectedTheme, selectedFilter, customNote, newLayout);
+      generatePhotoStrip(capturedPhotos, selectedTheme, selectedFilter, customNote, newLayout, placedStickers);
     }
   };
 
   const handleNoteChange = (text: string) => {
     setCustomNote(text);
     if (capturedPhotos.length > 0) {
-      generatePhotoStrip(capturedPhotos, selectedTheme, selectedFilter, text, selectedLayout);
+      generatePhotoStrip(capturedPhotos, selectedTheme, selectedFilter, text, selectedLayout, placedStickers);
     }
   };
 
+  // LOGIKA STIKER INTERAKTIF
+  const handleAddSticker = (emoji: string) => {
+    const newSticker: PlacedSticker = {
+      id: `${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+      emoji,
+      x: 50,
+      y: 35 + (placedStickers.length % 4) * 12,
+    };
+    const updated = [...placedStickers, newSticker];
+    setPlacedStickers(updated);
+  };
+
+  const handleRemoveSticker = (id: string, e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    const updated = placedStickers.filter((s) => s.id !== id);
+    setPlacedStickers(updated);
+  };
+
+  // Menggeser Stiker dengan Pointer (Mouse / Sentuhan Jari)
+  const handlePointerDown = (id: string) => {
+    setActiveDraggingId(id);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!activeDraggingId || !previewContainerRef.current) return;
+
+    const rect = previewContainerRef.current.getBoundingClientRect();
+    const touchX = e.clientX - rect.left;
+    const touchY = e.clientY - rect.top;
+
+    const pctX = Math.max(5, Math.min(95, (touchX / rect.width) * 100));
+    const pctY = Math.max(5, Math.min(95, (touchY / rect.height) * 100));
+
+    setPlacedStickers((prev) =>
+      prev.map((s) => (s.id === activeDraggingId ? { ...s, x: pctX, y: pctY } : s))
+    );
+  };
+
+  const handlePointerUp = () => {
+    setActiveDraggingId(null);
+  };
+
   const handleDownload = async () => {
-    if (!finalStripUrl) return;
+    if (capturedPhotos.length === 0) return;
+
+    // Pastikan seluruh stiker tercetak rapi ke kanvas sebelum diunduh
+    await generatePhotoStrip(
+      capturedPhotos,
+      selectedTheme,
+      selectedFilter,
+      customNote,
+      selectedLayout,
+      placedStickers
+    );
 
     const fileName = `dekatan-solo-${selectedLayout}-${selectedTheme}-${Date.now()}.png`;
 
     try {
+      if (!finalStripUrl) return;
       const response = await fetch(finalStripUrl);
       const blob = await response.blob();
       const file = new File([blob], fileName, { type: 'image/png' });
@@ -515,18 +611,21 @@ export default function SoloPhotobooth() {
         return;
       }
     } catch (error) {
-      console.log('Web Share dibatalkan atau tidak didukung:', error);
+      console.log('Web Share dibatalkan:', error);
     }
 
-    const link = document.createElement('a');
-    link.download = fileName;
-    link.href = finalStripUrl;
-    link.click();
+    if (finalStripUrl) {
+      const link = document.createElement('a');
+      link.download = fileName;
+      link.href = finalStripUrl;
+      link.click();
+    }
   };
 
   const handleRetake = () => {
     setFinalStripUrl(null);
     setCapturedPhotos([]);
+    setPlacedStickers([]);
     setCurrentShot(0);
     startCamera();
   };
@@ -634,13 +733,13 @@ export default function SoloPhotobooth() {
 
       {finalStripUrl && (
         <div className="w-full max-w-md flex flex-col items-center animate-fade-in">
-          <div className="flex items-center gap-2 text-stone-600 mb-2.5 text-sm font-semibold">
+          <div className="flex items-center gap-2 text-stone-600 mb-2 text-sm font-semibold">
             <Sparkles className="w-4 h-4 text-[#DA6868]" />
             Hasil Fotomu Sudah Jadi!
           </div>
 
-          {/* PEMILIH TATA LETAK: STRIP 1x4, STRIP 1x3, ATAU GRID 2x2 */}
-          <div className="flex flex-wrap items-center justify-center gap-1.5 mb-2.5 bg-white p-1.5 rounded-2xl shadow-xs border border-stone-200">
+          {/* PEMILIH TATA LETAK */}
+          <div className="flex flex-wrap items-center justify-center gap-1.5 mb-2 bg-white p-1.5 rounded-2xl shadow-xs border border-stone-200">
             <span className="text-[11px] font-semibold text-stone-500 px-1">Layout:</span>
             <button
               onClick={() => handleLayoutChange('strip4')}
@@ -677,52 +776,111 @@ export default function SoloPhotobooth() {
             </button>
           </div>
 
-          {/* PEMILIH FILTER */}
-          <div className="flex items-center gap-1.5 mb-2.5 bg-white px-3 py-1.5 rounded-2xl shadow-xs border border-stone-200">
-            <span className="text-xs font-semibold text-stone-500 mr-1.5">Filter:</span>
-            {(Object.keys(PHOTO_FILTERS) as PhotoFilterKey[]).map((key) => {
-              const item = PHOTO_FILTERS[key];
-              const isSelected = selectedFilter === key;
-              return (
-                <button
-                  key={key}
-                  onClick={() => handleFilterChange(key)}
-                  className={`px-3 py-1 rounded-xl text-xs font-medium touch-manipulation transition-all ${
-                    isSelected
-                      ? 'bg-[#DA6868] text-white shadow-xs'
-                      : 'text-stone-600 hover:bg-stone-100'
-                  }`}
-                >
-                  {item.name}
-                </button>
-              );
-            })}
+          {/* TAB BERALIH: FILTER ATAU STIKER (GAYA MOMOTO) */}
+          <div className="w-full bg-stone-200/70 p-1 rounded-2xl flex gap-1 mb-2.5">
+            <button
+              onClick={() => setActiveTab('filter')}
+              className={`flex-1 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+                activeTab === 'filter'
+                  ? 'bg-white text-stone-800 shadow-xs'
+                  : 'text-stone-600 hover:text-stone-800'
+              }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              Filter & Frame
+            </button>
+            <button
+              onClick={() => setActiveTab('stiker')}
+              className={`flex-1 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+                activeTab === 'stiker'
+                  ? 'bg-white text-[#DA6868] shadow-xs'
+                  : 'text-stone-600 hover:text-stone-800'
+              }`}
+            >
+              <Smile className="w-3.5 h-3.5" />
+              Stiker Digital ({placedStickers.length})
+            </button>
           </div>
 
-          {/* PEMILIH WARNA BINGKAI */}
-          <div className="flex items-center gap-3 mb-3 bg-white px-4 py-2 rounded-2xl shadow-xs border border-stone-200">
-            <span className="text-xs font-semibold text-stone-500 mr-1">Warna:</span>
-            {(Object.keys(FRAME_THEMES) as FrameThemeKey[]).map((key) => {
-              const theme = FRAME_THEMES[key];
-              const isSelected = selectedTheme === key;
-              return (
-                <button
-                  key={key}
-                  onClick={() => handleThemeChange(key)}
-                  className={`w-7 h-7 rounded-full transition-all border-2 touch-manipulation flex items-center justify-center ${
-                    isSelected
-                      ? 'scale-110 ring-2 ring-[#DA6868] ring-offset-2'
-                      : 'hover:scale-105 opacity-85'
-                  }`}
-                  style={{ backgroundColor: theme.bg, borderColor: theme.swatchBorder }}
-                  title={theme.name}
-                />
-              );
-            })}
-          </div>
+          {/* KONTEN TAB FILTER */}
+          {activeTab === 'filter' && (
+            <div className="w-full flex flex-col gap-2 mb-3 animate-fade-in">
+              <div className="flex items-center justify-center gap-1.5 bg-white px-3 py-1.5 rounded-2xl shadow-xs border border-stone-200">
+                <span className="text-xs font-semibold text-stone-500 mr-1">Filter:</span>
+                {(Object.keys(PHOTO_FILTERS) as PhotoFilterKey[]).map((key) => {
+                  const item = PHOTO_FILTERS[key];
+                  const isSelected = selectedFilter === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => handleFilterChange(key)}
+                      className={`px-3 py-1 rounded-xl text-xs font-medium touch-manipulation transition-all ${
+                        isSelected
+                          ? 'bg-[#DA6868] text-white shadow-xs'
+                          : 'text-stone-600 hover:bg-stone-100'
+                      }`}
+                    >
+                      {item.name}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center justify-center gap-3 bg-white px-4 py-2 rounded-2xl shadow-xs border border-stone-200">
+                <span className="text-xs font-semibold text-stone-500 mr-1">Warna Frame:</span>
+                {(Object.keys(FRAME_THEMES) as FrameThemeKey[]).map((key) => {
+                  const theme = FRAME_THEMES[key];
+                  const isSelected = selectedTheme === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => handleThemeChange(key)}
+                      className={`w-7 h-7 rounded-full transition-all border-2 touch-manipulation flex items-center justify-center ${
+                        isSelected
+                          ? 'scale-110 ring-2 ring-[#DA6868] ring-offset-2'
+                          : 'hover:scale-105 opacity-85'
+                      }`}
+                      style={{ backgroundColor: theme.bg, borderColor: theme.swatchBorder }}
+                      title={theme.name}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* KONTEN TAB STIKER */}
+          {activeTab === 'stiker' && (
+            <div className="w-full bg-white p-3 rounded-2xl shadow-xs border border-stone-200 mb-3 animate-fade-in">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-semibold text-stone-600">
+                  Ketuk untuk menempel, lalu seret di atas foto:
+                </span>
+                {placedStickers.length > 0 && (
+                  <button
+                    onClick={() => setPlacedStickers([])}
+                    className="text-[10px] text-red-500 font-medium hover:underline"
+                  >
+                    Hapus Semua
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-6 gap-2">
+                {AVAILABLE_STICKERS.map((emoji, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleAddSticker(emoji)}
+                    className="h-10 text-xl bg-stone-50 hover:bg-rose-50 rounded-xl border border-stone-100 active:scale-95 touch-manipulation flex items-center justify-center transition"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* INPUT PESAN PRIBADI */}
-          <div className="w-full bg-white p-3 rounded-2xl shadow-xs border border-stone-200 mb-4">
+          <div className="w-full bg-white p-3 rounded-2xl shadow-xs border border-stone-200 mb-3">
             <label className="block text-xs font-semibold text-stone-600 mb-1.5">
               Pesan Pribadi / Catatan Singkat:
             </label>
@@ -734,15 +892,14 @@ export default function SoloPhotobooth() {
               onChange={(e) => handleNoteChange(e.target.value)}
               className="w-full px-3 py-2 text-xs rounded-xl border border-stone-200 focus:outline-none focus:border-[#DA6868] text-stone-700 placeholder:text-stone-400"
             />
-            <div className="flex justify-between items-center mt-1">
-              <span className="text-[10px] text-stone-400">Tercetak langsung di bawah foto</span>
-              <span className="text-[10px] text-stone-400">{customNote.length}/40</span>
-            </div>
           </div>
 
-          {/* PRATINJAU KANVAS HASIL FOTO */}
+          {/* PRATINJAU KERTAS STRIP + LAPISAN STIKER GESER (DRAGGABLE) */}
           <div
-            className={`p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 ${
+            ref={previewContainerRef}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            className={`relative select-none touch-none p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 ${
               selectedLayout === 'grid'
                 ? 'max-w-[320px]'
                 : selectedLayout === 'strip3'
@@ -750,21 +907,53 @@ export default function SoloPhotobooth() {
                 : 'max-w-[270px]'
             }`}
           >
+            {/* Gambar Dasar Strip Foto */}
             {/* eslint-disable-next-html-element/no-img-element */}
             <img
               src={finalStripUrl}
               alt="Hasil Photobooth"
-              className="w-full h-auto rounded-lg shadow-inner"
+              className="w-full h-auto rounded-lg shadow-inner pointer-events-none"
             />
+
+            {/* Lapisan Stiker yang Bisa Ditarik dengan Sentuhan Jari */}
+            {placedStickers.map((stk) => (
+              <div
+                key={stk.id}
+                onPointerDown={() => handlePointerDown(stk.id)}
+                style={{
+                  left: `${stk.x}%`,
+                  top: `${stk.y}%`,
+                  transform: 'translate(-50%, -50%)',
+                }}
+                className={`absolute cursor-move text-3xl touch-manipulation transition-transform ${
+                  activeDraggingId === stk.id ? 'scale-125 z-30 drop-shadow-lg' : 'z-20 hover:scale-110'
+                }`}
+              >
+                <span>{stk.emoji}</span>
+                {/* Tombol Hapus Kecil di Setiap Stiker */}
+                <button
+                  onClick={(e) => handleRemoveSticker(stk.id, e)}
+                  className="absolute -top-1 -right-1 bg-black/60 text-white rounded-full p-0.5 hover:bg-red-500 transition"
+                >
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </div>
+            ))}
           </div>
 
-          <div className="w-full flex flex-col gap-3 mt-6">
+          {placedStickers.length > 0 && (
+            <p className="text-[11px] text-stone-500 mt-2 text-center">
+              💡 Sentuh dan geser stiker untuk mengatur posisinya sebelum disimpan.
+            </p>
+          )}
+
+          <div className="w-full flex flex-col gap-3 mt-5">
             <button
               onClick={handleDownload}
               className="w-full py-3.5 bg-[#DA6868] text-white font-bold rounded-xl shadow-md hover:bg-[#c85656] active:scale-95 touch-manipulation flex items-center justify-center gap-2 transition"
             >
               <Download className="w-5 h-5" />
-              Simpan / Bagikan Foto ({selectedLayout === 'grid' ? 'Grid 2×2' : selectedLayout === 'strip3' ? 'Strip 1×3' : 'Strip 1×4'})
+              Simpan / Bagikan Foto Strip
             </button>
 
             <button
