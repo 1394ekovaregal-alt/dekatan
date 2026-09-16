@@ -9,56 +9,19 @@ import {
   Download,
   ArrowLeft,
   Sparkles,
-  LayoutGrid,
-  Rows,
   Smile,
   SlidersHorizontal,
   X,
   Maximize2,
   ZoomIn,
   ZoomOut,
+  Palette,
 } from 'lucide-react';
-
-const FRAME_THEMES = {
-  white: {
-    name: 'Putih Bersih',
-    bg: '#FFFFFF',
-    subText: '#64748B',
-    editionText: '#94A3B8',
-    border: '#F1F5F9',
-    divider: '#F1F5F9',
-    swatchBorder: '#E2E8F0',
-  },
-  black: {
-    name: 'Hitam Retro',
-    bg: '#18181B',
-    subText: '#A1A1AA',
-    editionText: '#71717A',
-    border: '#27272A',
-    divider: '#27272A',
-    swatchBorder: '#18181B',
-  },
-  cream: {
-    name: 'Krem Hangat',
-    bg: '#FAF7F2',
-    subText: '#78716C',
-    editionText: '#A8A29E',
-    border: '#E7E5E4',
-    divider: '#E7E5E4',
-    swatchBorder: '#D6D3D1',
-  },
-  coral: {
-    name: 'Coral Dekatan',
-    bg: '#DA6868',
-    subText: '#FFE4E6',
-    editionText: '#FECDD3',
-    border: '#E57373',
-    divider: '#E57373',
-    swatchBorder: '#DA6868',
-  },
-};
-
-type FrameThemeKey = keyof typeof FRAME_THEMES;
+import TemplateSelectorModal, {
+  FrameTemplate,
+  FRAME_TEMPLATES,
+  LayoutMode,
+} from '@/components/TemplateSelectorModal';
 
 const PHOTO_FILTERS = {
   normal: { name: 'Asli', filter: 'none' },
@@ -68,7 +31,6 @@ const PHOTO_FILTERS = {
 } as const;
 
 type PhotoFilterKey = keyof typeof PHOTO_FILTERS;
-type LayoutMode = 'strip4' | 'strip3' | 'grid';
 
 const AVAILABLE_STICKERS = [
   '❤️', '💖', '✨', '🎀', '🧸', '🌸',
@@ -79,9 +41,9 @@ const AVAILABLE_STICKERS = [
 interface PlacedSticker {
   id: string;
   emoji: string;
-  x: number; // Persentase koordinat horizontal (0 - 100%)
-  y: number; // Persentase koordinat vertikal (0 - 100%)
-  scale: number; // Faktor skala ukuran (0.6 - 2.5)
+  x: number;
+  y: number;
+  scale: number;
 }
 
 export default function SoloPhotobooth() {
@@ -100,12 +62,14 @@ export default function SoloPhotobooth() {
   const [isGeneratingStrip, setIsGeneratingStrip] = useState(false);
   const [showFlash, setShowFlash] = useState(false);
 
-  const [selectedTheme, setSelectedTheme] = useState<FrameThemeKey>('white');
-  const [selectedFilter, setSelectedFilter] = useState<PhotoFilterKey>('normal');
+  // Template & Layout State
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<FrameTemplate>(FRAME_TEMPLATES[0]);
   const [selectedLayout, setSelectedLayout] = useState<LayoutMode>('strip4');
+  const [selectedFilter, setSelectedFilter] = useState<PhotoFilterKey>('normal');
   const [customNote, setCustomNote] = useState<string>('');
 
-  // Tab & Stiker Interaktif
+  // Stiker State
   const [activeTab, setActiveTab] = useState<'filter' | 'stiker'>('filter');
   const [placedStickers, setPlacedStickers] = useState<PlacedSticker[]>([]);
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
@@ -161,24 +125,17 @@ export default function SoloPhotobooth() {
       initAudio();
       const ctx = audioCtxRef.current;
       if (!ctx) return;
-
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-
       osc.type = 'sine';
       osc.frequency.setValueAtTime(800, ctx.currentTime);
-
       gain.gain.setValueAtTime(0.5, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
-
       osc.connect(gain);
       gain.connect(ctx.destination);
-
       osc.start();
       osc.stop(ctx.currentTime + 0.15);
-    } catch (e) {
-      console.log('Beep audio error:', e);
-    }
+    } catch (_) {}
   }, [initAudio]);
 
   const playShutterSound = useCallback(() => {
@@ -196,15 +153,12 @@ export default function SoloPhotobooth() {
 
       const noise = ctx.createBufferSource();
       noise.buffer = buffer;
-
       const filter = ctx.createBiquadFilter();
       filter.type = 'bandpass';
       filter.frequency.value = 1500;
-
       const noiseGain = ctx.createGain();
       noiseGain.gain.setValueAtTime(0.6, ctx.currentTime);
       noiseGain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-
       noise.connect(filter);
       filter.connect(noiseGain);
       noiseGain.connect(ctx.destination);
@@ -215,27 +169,20 @@ export default function SoloPhotobooth() {
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(200, ctx.currentTime);
       osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.05);
-
       clickGain.gain.setValueAtTime(0.7, ctx.currentTime);
       clickGain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05);
-
       osc.connect(clickGain);
       clickGain.connect(ctx.destination);
-
       osc.start();
       osc.stop(ctx.currentTime + 0.05);
-    } catch (e) {
-      console.log('Shutter audio error:', e);
-    }
+    } catch (_) {}
   }, [initAudio]);
 
   const startCamera = useCallback(async () => {
     try {
       setCameraError(null);
-
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
       }
 
       let stream: MediaStream;
@@ -252,20 +199,18 @@ export default function SoloPhotobooth() {
       }
 
       streamRef.current = stream;
-
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.onloadedmetadata = () => {
-          videoRef.current?.play().catch((e) => console.log('Autoplay error:', e));
+          videoRef.current?.play().catch(() => {});
         };
       }
       setCameraReady(true);
     } catch (err: unknown) {
-      console.error('Kamera gagal diakses:', err);
       if (err instanceof Error) {
         setCameraError(`${err.name}: ${err.message}`);
       } else {
-        setCameraError('Perangkat kamera tidak dapat diakses.');
+        setCameraError('Kamera tidak dapat diakses.');
       }
     }
   }, []);
@@ -288,39 +233,34 @@ export default function SoloPhotobooth() {
   const captureFrame = (): string => {
     const video = videoRef.current;
     if (!video) return '';
-
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth || 1280;
     canvas.height = video.videoHeight || 720;
     const ctx = canvas.getContext('2d');
     if (!ctx) return '';
-
     ctx.translate(canvas.width, 0);
     ctx.scale(-1, 1);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
     return canvas.toDataURL('image/jpeg', 0.95);
   };
 
+  // Logika Render Kanvas dengan Dukungan Bentuk Potongan (Arch, Heart, Rounded, Rect)
   const generatePhotoStrip = useCallback(
     async (
       photos: string[],
-      themeKey: FrameThemeKey = selectedTheme,
+      template: FrameTemplate = selectedTemplate,
       filterKey: PhotoFilterKey = selectedFilter,
       note: string = customNote,
       layout: LayoutMode = selectedLayout,
       stickersToDraw: PlacedSticker[] = placedStickers
     ) => {
       setIsGeneratingStrip(true);
-
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const theme = FRAME_THEMES[themeKey];
       const isGrid = layout === 'grid';
       const isStrip3 = layout === 'strip3';
-
       const padding = 32;
       const spacing = 18;
       const footerHeight = note.trim() ? 235 : 195;
@@ -353,9 +293,22 @@ export default function SoloPhotobooth() {
       canvas.width = stripWidth;
       canvas.height = totalHeight;
 
-      ctx.fillStyle = theme.bg;
+      // Warna Latar Template
+      ctx.fillStyle = template.bg;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+      // Gambar Lubang Klise jika tema film
+      if (template.pattern === 'film') {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        const holeH = 14;
+        const holeW = 8;
+        for (let y = 15; y < totalHeight - 20; y += 26) {
+          ctx.fillRect(6, y, holeW, holeH);
+          ctx.fillRect(stripWidth - 14, y, holeW, holeH);
+        }
+      }
+
+      // Render Setiap Foto dengan Bentuk Potongan (Clipping Shape)
       for (let i = 0; i < renderPhotos.length; i++) {
         const img = new (window as any).Image();
         img.src = renderPhotos[i];
@@ -377,7 +330,6 @@ export default function SoloPhotobooth() {
 
         const imgRatio = img.width / img.height;
         const targetRatio = photoWidth / photoHeight;
-
         let sx = 0;
         let sy = 0;
         let sWidth = img.width;
@@ -392,24 +344,76 @@ export default function SoloPhotobooth() {
         }
 
         ctx.save();
+
+        // Terapkan Jalur Potongan (Clipping Path)
+        ctx.beginPath();
+        if (template.slotShape === 'arch') {
+          // Bentuk Kubah Melengkung atas
+          ctx.roundRect(xPos, yPos, photoWidth, photoHeight, [photoWidth / 2, photoWidth / 2, 8, 8]);
+        } else if (template.slotShape === 'rounded') {
+          ctx.roundRect(xPos, yPos, photoWidth, photoHeight, 16);
+        } else if (template.slotShape === 'heart') {
+          // Bentuk Kasih Sayang / Hati
+          const topCurveHeight = photoHeight * 0.3;
+          ctx.moveTo(xPos + photoWidth / 2, yPos + photoHeight);
+          ctx.bezierCurveTo(
+            xPos,
+            yPos + photoHeight * 0.7,
+            xPos,
+            yPos + topCurveHeight,
+            xPos + photoWidth / 4,
+            yPos
+          );
+          ctx.bezierCurveTo(
+            xPos + photoWidth / 2,
+            yPos,
+            xPos + photoWidth / 2,
+            yPos + topCurveHeight,
+            xPos + photoWidth / 2,
+            yPos + topCurveHeight
+          );
+          ctx.bezierCurveTo(
+            xPos + photoWidth / 2,
+            yPos + topCurveHeight,
+            xPos + photoWidth / 2,
+            yPos,
+            xPos + (photoWidth * 3) / 4,
+            yPos
+          );
+          ctx.bezierCurveTo(
+            xPos + photoWidth,
+            yPos + topCurveHeight,
+            xPos + photoWidth,
+            yPos + photoHeight * 0.7,
+            xPos + photoWidth / 2,
+            yPos + photoHeight
+          );
+        } else {
+          ctx.rect(xPos, yPos, photoWidth, photoHeight);
+        }
+        ctx.clip();
+
+        // Render Gambar + Filter
         ctx.filter = PHOTO_FILTERS[filterKey].filter;
         ctx.drawImage(img, sx, sy, sWidth, sHeight, xPos, yPos, photoWidth, photoHeight);
         ctx.restore();
 
-        ctx.strokeStyle = theme.border;
-        ctx.lineWidth = 2;
-        ctx.strokeRect(xPos, yPos, photoWidth, photoHeight);
+        // Garis Tepi Slot
+        ctx.strokeStyle = template.slotBorder;
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
       }
 
+      // Garis Pembatas Bawah
       const footerStartY = totalHeight - footerHeight;
-
-      ctx.strokeStyle = theme.divider;
+      ctx.strokeStyle = template.border;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(padding + 20, footerStartY + 10);
       ctx.lineTo(stripWidth - padding - 20, footerStartY + 10);
       ctx.stroke();
 
+      // Logo Dekatan
       const logoImg = new (window as any).Image();
       logoImg.src = '/dekatan1.png';
       await new Promise((resolve) => {
@@ -417,10 +421,10 @@ export default function SoloPhotobooth() {
         logoImg.onerror = resolve;
       });
 
-      const logoWidth = 190;
+      const logoWidth = 180;
       const logoHeight = logoImg.naturalHeight
         ? (logoImg.naturalHeight / logoImg.naturalWidth) * logoWidth
-        : 52;
+        : 50;
       const logoX = (stripWidth - logoWidth) / 2;
       const logoY = footerStartY + 25;
 
@@ -449,24 +453,16 @@ export default function SoloPhotobooth() {
         currentTextY += 24;
       }
 
-      ctx.font = '500 14px sans-serif';
-      ctx.fillStyle = theme.subText;
+      ctx.font = '500 13px sans-serif';
+      ctx.fillStyle = template.subTextColor;
       ctx.textAlign = 'center';
       ctx.fillText(`${formattedDate} • ${formattedTime} WITA`, stripWidth / 2, currentTextY);
 
-      ctx.font = '12px sans-serif';
-      ctx.fillStyle = theme.editionText;
-      ctx.fillText(
-        isGrid
-          ? 'Solo Photobooth • Edisi Grid (2×2)'
-          : isStrip3
-          ? 'Solo Photobooth • Edisi Strip (1×3)'
-          : 'Solo Photobooth • Edisi Strip (1×4)',
-        stripWidth / 2,
-        currentTextY + 20
-      );
+      ctx.font = '700 12px sans-serif';
+      ctx.fillStyle = template.textColor;
+      ctx.fillText(template.labelFooter || 'DEKATAN PHOTOBOOTH', stripWidth / 2, currentTextY + 20);
 
-      // CETAK STIKER DIGITAL BESERTA SKALA UKURANNYA KE KANVAS
+      // Render Stiker Digital ke Kanvas
       if (stickersToDraw && stickersToDraw.length > 0) {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -484,7 +480,7 @@ export default function SoloPhotobooth() {
       setIsGeneratingStrip(false);
       stopCamera();
     },
-    [selectedTheme, selectedFilter, customNote, selectedLayout, placedStickers, stopCamera]
+    [selectedTemplate, selectedFilter, customNote, selectedLayout, placedStickers, stopCamera]
   );
 
   const startPhotoSession = async () => {
@@ -495,9 +491,10 @@ export default function SoloPhotobooth() {
     setPlacedStickers([]);
     setSelectedStickerId(null);
 
+    const totalShots = selectedLayout === 'strip3' ? 3 : 4;
     const tempPhotos: string[] = [];
 
-    for (let shot = 1; shot <= 4; shot++) {
+    for (let shot = 1; shot <= totalShots; shot++) {
       setCurrentShot(shot);
 
       for (let count = 3; count > 0; count--) {
@@ -515,44 +512,30 @@ export default function SoloPhotobooth() {
       setCapturedPhotos([...tempPhotos]);
       setTimeout(() => setShowFlash(false), 200);
 
-      if (shot < 4) {
+      if (shot < totalShots) {
         await new Promise((resolve) => setTimeout(resolve, 1200));
       }
     }
 
     setIsCapturing(false);
-    generatePhotoStrip(tempPhotos, selectedTheme, selectedFilter, customNote, selectedLayout, []);
-  };
-
-  const handleThemeChange = (newTheme: FrameThemeKey) => {
-    setSelectedTheme(newTheme);
-    if (capturedPhotos.length > 0) {
-      generatePhotoStrip(capturedPhotos, newTheme, selectedFilter, customNote, selectedLayout, placedStickers);
-    }
+    generatePhotoStrip(tempPhotos, selectedTemplate, selectedFilter, customNote, selectedLayout, []);
   };
 
   const handleFilterChange = (newFilter: PhotoFilterKey) => {
     setSelectedFilter(newFilter);
     if (capturedPhotos.length > 0) {
-      generatePhotoStrip(capturedPhotos, selectedTheme, newFilter, customNote, selectedLayout, placedStickers);
-    }
-  };
-
-  const handleLayoutChange = (newLayout: LayoutMode) => {
-    setSelectedLayout(newLayout);
-    if (capturedPhotos.length > 0) {
-      generatePhotoStrip(capturedPhotos, selectedTheme, selectedFilter, customNote, newLayout, placedStickers);
+      generatePhotoStrip(capturedPhotos, selectedTemplate, newFilter, customNote, selectedLayout, placedStickers);
     }
   };
 
   const handleNoteChange = (text: string) => {
     setCustomNote(text);
     if (capturedPhotos.length > 0) {
-      generatePhotoStrip(capturedPhotos, selectedTheme, selectedFilter, text, selectedLayout, placedStickers);
+      generatePhotoStrip(capturedPhotos, selectedTemplate, selectedFilter, text, selectedLayout, placedStickers);
     }
   };
 
-  // LOGIKA STIKER: TAMBAH, GESER, DAN UBAH UKURAN
+  // Stiker Controls
   const handleAddSticker = (emoji: string) => {
     const newId = `${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
     const newSticker: PlacedSticker = {
@@ -574,7 +557,6 @@ export default function SoloPhotobooth() {
     if (selectedStickerId === id) setSelectedStickerId(null);
   };
 
-  // 1. Geser Posisi Stiker
   const handleStickerPointerDown = (e: React.PointerEvent, id: string) => {
     e.stopPropagation();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -585,14 +567,11 @@ export default function SoloPhotobooth() {
   const handleStickerPointerMove = (e: React.PointerEvent, id: string) => {
     if (activeDraggingId !== id || !previewContainerRef.current) return;
     e.stopPropagation();
-
     const rect = previewContainerRef.current.getBoundingClientRect();
     const touchX = e.clientX - rect.left;
     const touchY = e.clientY - rect.top;
-
     const pctX = Math.max(5, Math.min(95, (touchX / rect.width) * 100));
     const pctY = Math.max(5, Math.min(95, (touchY / rect.height) * 100));
-
     setPlacedStickers((prev) =>
       prev.map((s) => (s.id === id ? { ...s, x: pctX, y: pctY } : s))
     );
@@ -605,7 +584,6 @@ export default function SoloPhotobooth() {
     setActiveDraggingId(null);
   };
 
-  // 2. Gagang Sudut Ubah Ukuran (Corner Resize Handle)
   const handleResizeHandleDown = (e: React.PointerEvent, id: string, initialScale: number) => {
     e.stopPropagation();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -621,10 +599,11 @@ export default function SoloPhotobooth() {
   const handleResizeHandleMove = (e: React.PointerEvent) => {
     if (!resizeState) return;
     e.stopPropagation();
-
-    const delta = (e.clientX - resizeState.startX) + (e.clientY - resizeState.startY);
-    const newScale = Math.max(0.5, Math.min(2.5, Number((resizeState.initialScale + delta * 0.012).toFixed(2))));
-
+    const delta = e.clientX - resizeState.startX + (e.clientY - resizeState.startY);
+    const newScale = Math.max(
+      0.5,
+      Math.min(2.5, Number((resizeState.initialScale + delta * 0.012).toFixed(2)))
+    );
     setPlacedStickers((prev) =>
       prev.map((s) => (s.id === resizeState.id ? { ...s, scale: newScale } : s))
     );
@@ -638,12 +617,14 @@ export default function SoloPhotobooth() {
     setResizeState(null);
   };
 
-  // 3. Tombol Tambah/Kurang Skala Cepat
   const adjustStickerScale = (id: string, step: number) => {
     setPlacedStickers((prev) =>
       prev.map((s) =>
         s.id === id
-          ? { ...s, scale: Math.max(0.5, Math.min(2.5, Number(((s.scale || 1.0) + step).toFixed(2)))) }
+          ? {
+              ...s,
+              scale: Math.max(0.5, Math.min(2.5, Number(((s.scale || 1.0) + step).toFixed(2)))),
+            }
           : s
       )
     );
@@ -651,17 +632,16 @@ export default function SoloPhotobooth() {
 
   const handleDownload = async () => {
     if (capturedPhotos.length === 0) return;
-
     await generatePhotoStrip(
       capturedPhotos,
-      selectedTheme,
+      selectedTemplate,
       selectedFilter,
       customNote,
       selectedLayout,
       placedStickers
     );
 
-    const fileName = `dekatan-solo-${selectedLayout}-${selectedTheme}-${Date.now()}.png`;
+    const fileName = `dekatan-solo-${selectedTemplate.id}-${Date.now()}.png`;
 
     try {
       if (!finalStripUrl) return;
@@ -677,9 +657,7 @@ export default function SoloPhotobooth() {
         });
         return;
       }
-    } catch (error) {
-      console.log('Web Share dibatalkan:', error);
-    }
+    } catch (_) {}
 
     if (finalStripUrl) {
       const link = document.createElement('a');
@@ -699,27 +677,30 @@ export default function SoloPhotobooth() {
   };
 
   const currentSelectedSticker = placedStickers.find((s) => s.id === selectedStickerId);
+  const totalShotsRequired = selectedLayout === 'strip3' ? 3 : 4;
 
   return (
-    <main className="min-h-screen bg-[#FAF7F2] text-[#264653] flex flex-col items-center px-4 py-5 md:py-10">
-      <div className="w-full max-w-2xl flex items-center justify-between mb-5">
+    <main className="min-h-screen bg-[#FAF7F2] text-[#264653] flex flex-col items-center px-4 py-5 md:py-8">
+      {/* Header */}
+      <div className="w-full max-w-2xl flex items-center justify-between mb-4">
         <Link
           href="/"
           className="inline-flex items-center gap-1.5 text-xs md:text-sm font-medium text-slate-600 hover:text-[#DA6868] transition"
         >
           <ArrowLeft className="w-4 h-4" />
-          Kembali ke Beranda
+          Beranda
         </Link>
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 md:w-11 md:h-11 relative shrink-0 rounded-xl overflow-hidden shadow-xs">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 relative shrink-0 rounded-xl overflow-hidden shadow-xs">
             <Image src="/dekatan2.png" alt="Dekatan" fill className="object-contain" priority />
           </div>
-          <span className="text-[11px] md:text-xs font-semibold tracking-wider text-[#DA6868] uppercase bg-rose-50 px-3 py-1 md:py-1.5 rounded-full border border-rose-100">
+          <span className="text-[11px] font-semibold tracking-wider text-[#DA6868] uppercase bg-rose-50 px-2.5 py-1 rounded-full border border-rose-100">
             Mode Sendiri
           </span>
         </div>
       </div>
 
+      {/* Sesi Kamera */}
       {!finalStripUrl && (
         <div className="w-full max-w-md flex flex-col items-center">
           <div className="relative w-full aspect-[3/4] bg-black rounded-3xl overflow-hidden shadow-xl border-4 border-white">
@@ -742,9 +723,7 @@ export default function SoloPhotobooth() {
                   muted
                   className="w-full h-full object-cover -scale-x-100"
                 />
-
                 {showFlash && <div className="absolute inset-0 bg-white animate-fade-out z-20" />}
-
                 {countdown !== null && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[2px] z-10">
                     <span className="text-8xl font-black text-white drop-shadow-lg animate-pulse">
@@ -752,32 +731,34 @@ export default function SoloPhotobooth() {
                     </span>
                   </div>
                 )}
-
                 {isCapturing && (
                   <div className="absolute top-4 left-4 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full text-white text-xs font-medium z-10">
-                    Foto ke-{currentShot} dari 4
+                    Foto ke-{currentShot} dari {totalShotsRequired}
                   </div>
                 )}
               </>
             )}
           </div>
 
-          <div className="flex gap-2 my-4">
-            {[0, 1, 2, 3].map((idx) => (
-              <div
-                key={idx}
-                className={`w-3 h-3 rounded-full transition-all ${
-                  capturedPhotos[idx]
-                    ? 'bg-[#DA6868] scale-110'
-                    : isCapturing && currentShot === idx + 1
-                    ? 'bg-[#DA6868]/50 animate-pulse'
-                    : 'bg-stone-300'
-                }`}
-              />
-            ))}
-          </div>
+          {/* Tombol Pemicu Modal Template Fremio */}
+          <button
+            onClick={() => setIsTemplateModalOpen(true)}
+            disabled={isCapturing}
+            className="w-full mt-3.5 py-2.5 px-4 bg-white border border-stone-200 rounded-2xl shadow-xs flex items-center justify-between text-xs font-semibold text-stone-700 hover:border-[#DA6868] active:scale-95 transition"
+          >
+            <div className="flex items-center gap-2">
+              <Palette className="w-4 h-4 text-[#DA6868]" />
+              <span>
+                Desain:{' '}
+                <strong className="text-[#DA6868]">
+                  {selectedTemplate.name} ({selectedLayout === 'grid' ? 'Grid 2×2' : selectedLayout === 'strip3' ? '1×3' : '1×4'})
+                </strong>
+              </span>
+            </div>
+            <span className="text-[11px] text-stone-400">Pilih Desain →</span>
+          </button>
 
-          <div className="w-full mt-1">
+          <div className="w-full mt-3">
             <button
               onClick={startPhotoSession}
               disabled={!cameraReady || isCapturing || isGeneratingStrip}
@@ -789,18 +770,19 @@ export default function SoloPhotobooth() {
             >
               <Camera className="w-5 h-5" />
               {isCapturing
-                ? `Mengambil Foto (${currentShot}/4)...`
+                ? `Mengambil Foto (${currentShot}/${totalShotsRequired})...`
                 : isGeneratingStrip
                 ? 'Menyusun Foto...'
-                : 'Mulai Foto (4 Jepretan)'}
+                : `Mulai Foto (${totalShotsRequired} Jepretan)`}
             </button>
-            <p className="text-center text-xs text-slate-500 mt-2.5">
-              Kamera menghitung 3 detik otomatis untuk setiap jepretan.
+            <p className="text-center text-xs text-slate-500 mt-2">
+              Kamera menghitung mundur 3 detik otomatis untuk setiap pose.
             </p>
           </div>
         </div>
       )}
 
+      {/* Pratinjau Hasil & Pengaturan Akhir */}
       {finalStripUrl && (
         <div className="w-full max-w-md flex flex-col items-center animate-fade-in">
           <div className="flex items-center gap-2 text-stone-600 mb-2 text-sm font-semibold">
@@ -808,45 +790,21 @@ export default function SoloPhotobooth() {
             Hasil Fotomu Sudah Jadi!
           </div>
 
-          {/* PEMILIH TATA LETAK */}
-          <div className="flex flex-wrap items-center justify-center gap-1.5 mb-2 bg-white p-1.5 rounded-2xl shadow-xs border border-stone-200">
-            <span className="text-[11px] font-semibold text-stone-500 px-1">Layout:</span>
-            <button
-              onClick={() => handleLayoutChange('strip4')}
-              className={`px-2.5 py-1 rounded-xl text-xs font-medium flex items-center gap-1 touch-manipulation transition ${
-                selectedLayout === 'strip4'
-                  ? 'bg-[#DA6868] text-white shadow-xs'
-                  : 'text-stone-600 hover:bg-stone-100'
-              }`}
-            >
-              <Rows className="w-3.5 h-3.5" />
-              Strip (1×4)
-            </button>
-            <button
-              onClick={() => handleLayoutChange('strip3')}
-              className={`px-2.5 py-1 rounded-xl text-xs font-medium flex items-center gap-1 touch-manipulation transition ${
-                selectedLayout === 'strip3'
-                  ? 'bg-[#DA6868] text-white shadow-xs'
-                  : 'text-stone-600 hover:bg-stone-100'
-              }`}
-            >
-              <Rows className="w-3.5 h-3.5" />
-              Strip (1×3)
-            </button>
-            <button
-              onClick={() => handleLayoutChange('grid')}
-              className={`px-2.5 py-1 rounded-xl text-xs font-medium flex items-center gap-1 touch-manipulation transition ${
-                selectedLayout === 'grid'
-                  ? 'bg-[#DA6868] text-white shadow-xs'
-                  : 'text-stone-600 hover:bg-stone-100'
-              }`}
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              Grid (2×2)
-            </button>
-          </div>
+          <button
+            onClick={() => setIsTemplateModalOpen(true)}
+            className="w-full mb-3 py-2.5 px-4 bg-white border border-stone-200 rounded-2xl shadow-xs flex items-center justify-between text-xs font-semibold text-stone-700 hover:border-[#DA6868] active:scale-95 transition"
+          >
+            <div className="flex items-center gap-2">
+              <Palette className="w-4 h-4 text-[#DA6868]" />
+              <span>
+                Ganti Frame:{' '}
+                <strong className="text-[#DA6868]">{selectedTemplate.name}</strong>
+              </span>
+            </div>
+            <span className="text-[11px] text-stone-400">Ubah Desain →</span>
+          </button>
 
-          {/* TAB: FILTER ATAU STIKER */}
+          {/* Tab Filter & Stiker */}
           <div className="w-full bg-stone-200/70 p-1 rounded-2xl flex gap-1 mb-2.5">
             <button
               onClick={() => setActiveTab('filter')}
@@ -857,7 +815,7 @@ export default function SoloPhotobooth() {
               }`}
             >
               <SlidersHorizontal className="w-3.5 h-3.5" />
-              Filter & Frame
+              Pilihan Filter
             </button>
             <button
               onClick={() => setActiveTab('stiker')}
@@ -872,59 +830,34 @@ export default function SoloPhotobooth() {
             </button>
           </div>
 
-          {/* KONTEN TAB FILTER */}
           {activeTab === 'filter' && (
-            <div className="w-full flex flex-col gap-2 mb-3 animate-fade-in">
-              <div className="flex items-center justify-center gap-1.5 bg-white px-3 py-1.5 rounded-2xl shadow-xs border border-stone-200">
-                <span className="text-xs font-semibold text-stone-500 mr-1">Filter:</span>
-                {(Object.keys(PHOTO_FILTERS) as PhotoFilterKey[]).map((key) => {
-                  const item = PHOTO_FILTERS[key];
-                  const isSelected = selectedFilter === key;
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => handleFilterChange(key)}
-                      className={`px-3 py-1 rounded-xl text-xs font-medium touch-manipulation transition-all ${
-                        isSelected
-                          ? 'bg-[#DA6868] text-white shadow-xs'
-                          : 'text-stone-600 hover:bg-stone-100'
-                      }`}
-                    >
-                      {item.name}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="flex items-center justify-center gap-3 bg-white px-4 py-2 rounded-2xl shadow-xs border border-stone-200">
-                <span className="text-xs font-semibold text-stone-500 mr-1">Warna Frame:</span>
-                {(Object.keys(FRAME_THEMES) as FrameThemeKey[]).map((key) => {
-                  const theme = FRAME_THEMES[key];
-                  const isSelected = selectedTheme === key;
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => handleThemeChange(key)}
-                      className={`w-7 h-7 rounded-full transition-all border-2 touch-manipulation flex items-center justify-center ${
-                        isSelected
-                          ? 'scale-110 ring-2 ring-[#DA6868] ring-offset-2'
-                          : 'hover:scale-105 opacity-85'
-                      }`}
-                      style={{ backgroundColor: theme.bg, borderColor: theme.swatchBorder }}
-                      title={theme.name}
-                    />
-                  );
-                })}
-              </div>
+            <div className="w-full flex items-center justify-center gap-1.5 bg-white px-3 py-2 rounded-2xl shadow-xs border border-stone-200 mb-3 animate-fade-in">
+              <span className="text-xs font-semibold text-stone-500 mr-1">Filter:</span>
+              {(Object.keys(PHOTO_FILTERS) as PhotoFilterKey[]).map((key) => {
+                const item = PHOTO_FILTERS[key];
+                const isSelected = selectedFilter === key;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => handleFilterChange(key)}
+                    className={`px-3 py-1 rounded-xl text-xs font-medium touch-manipulation transition-all ${
+                      isSelected
+                        ? 'bg-[#DA6868] text-white shadow-xs'
+                        : 'text-stone-600 hover:bg-stone-100'
+                    }`}
+                  >
+                    {item.name}
+                  </button>
+                );
+              })}
             </div>
           )}
 
-          {/* KONTEN TAB STIKER */}
           {activeTab === 'stiker' && (
             <div className="w-full bg-white p-3 rounded-2xl shadow-xs border border-stone-200 mb-3 animate-fade-in">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[11px] font-semibold text-stone-600">
-                  Ketuk emoji untuk menempel ke foto:
+                  Ketuk emoji untuk menempel ke strip:
                 </span>
                 {placedStickers.length > 0 && (
                   <button
@@ -951,9 +884,8 @@ export default function SoloPhotobooth() {
                 ))}
               </div>
 
-              {/* PANEL KONTROL UKURAN STIKER AKTIF */}
               {currentSelectedSticker && (
-                <div className="bg-rose-50/70 p-2.5 rounded-xl border border-rose-100 flex items-center justify-between">
+                <div className="bg-rose-50/70 p-2 rounded-xl border border-rose-100 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-xl">{currentSelectedSticker.emoji}</span>
                     <span className="text-xs font-semibold text-stone-700">
@@ -964,14 +896,12 @@ export default function SoloPhotobooth() {
                     <button
                       onClick={() => adjustStickerScale(currentSelectedSticker.id, -0.2)}
                       className="p-1.5 bg-white text-stone-700 rounded-lg border border-stone-200 hover:bg-stone-50 active:scale-95 transition"
-                      title="Perkecil"
                     >
                       <ZoomOut className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => adjustStickerScale(currentSelectedSticker.id, 0.2)}
                       className="p-1.5 bg-white text-stone-700 rounded-lg border border-stone-200 hover:bg-stone-50 active:scale-95 transition"
-                      title="Perbesar"
                     >
                       <ZoomIn className="w-3.5 h-3.5" />
                     </button>
@@ -981,7 +911,7 @@ export default function SoloPhotobooth() {
             </div>
           )}
 
-          {/* INPUT PESAN PRIBADI */}
+          {/* Input Catatan */}
           <div className="w-full bg-white p-3 rounded-2xl shadow-xs border border-stone-200 mb-3">
             <label className="block text-xs font-semibold text-stone-600 mb-1.5">
               Pesan Pribadi / Catatan Singkat:
@@ -996,7 +926,7 @@ export default function SoloPhotobooth() {
             />
           </div>
 
-          {/* PRATINJAU KERTAS STRIP + LAPISAN STIKER (BISA DISCROLL + BISA DIUBAH UKURAN) */}
+          {/* Pratinjau Kertas Strip */}
           <div
             ref={previewContainerRef}
             onClick={() => setSelectedStickerId(null)}
@@ -1015,7 +945,6 @@ export default function SoloPhotobooth() {
               className="w-full h-auto rounded-lg shadow-inner pointer-events-none select-none touch-pan-y"
             />
 
-            {/* Lapisan Stiker yang Bisa Digeser dan Diubah Ukurannya */}
             {placedStickers.map((stk) => {
               const isSelected = selectedStickerId === stk.id;
               const scale = stk.scale || 1.0;
@@ -1048,26 +977,20 @@ export default function SoloPhotobooth() {
                     }`}
                   >
                     <span>{stk.emoji}</span>
-
-                    {/* Tombol Hapus Kecil */}
                     <button
                       type="button"
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => handleRemoveSticker(stk.id, e)}
                       className="absolute -top-2 -right-2 bg-stone-900/80 text-white rounded-full p-0.5 hover:bg-red-500 transition shadow-sm"
-                      title="Hapus"
                     >
                       <X className="w-2.5 h-2.5" />
                     </button>
-
-                    {/* Gagang Sudut Ubah Ukuran (Corner Resize Handle) */}
                     <div
                       onPointerDown={(e) => handleResizeHandleDown(e, stk.id, scale)}
                       onPointerMove={handleResizeHandleMove}
                       onPointerUp={handleResizeHandleUp}
                       onPointerCancel={handleResizeHandleUp}
                       className="absolute -bottom-2 -right-2 w-5 h-5 bg-[#DA6868] text-white rounded-full flex items-center justify-center cursor-se-resize shadow-md active:scale-125 touch-none"
-                      title="Tarik sudut untuk membesarkan/mengecilkan"
                     >
                       <Maximize2 className="w-2.5 h-2.5" />
                     </div>
@@ -1076,12 +999,6 @@ export default function SoloPhotobooth() {
               );
             })}
           </div>
-
-          {placedStickers.length > 0 && (
-            <p className="text-[11px] text-stone-500 mt-2 text-center">
-              💡 Seret stiker untuk pindah posisi, atau tarik titik merah di sudutnya untuk mengatur ukuran.
-            </p>
-          )}
 
           <div className="w-full flex flex-col gap-3 mt-5">
             <button
@@ -1102,6 +1019,26 @@ export default function SoloPhotobooth() {
           </div>
         </div>
       )}
+
+      {/* Modal Katalog Frame Fremio */}
+      <TemplateSelectorModal
+        isOpen={isTemplateModalOpen}
+        onClose={() => setIsTemplateModalOpen(false)}
+        selectedTemplateId={selectedTemplate.id}
+        selectedLayout={selectedLayout}
+        onSelectLayout={(layout) => {
+          setSelectedLayout(layout);
+          if (capturedPhotos.length > 0) {
+            generatePhotoStrip(capturedPhotos, selectedTemplate, selectedFilter, customNote, layout, placedStickers);
+          }
+        }}
+        onSelectTemplate={(tpl) => {
+          setSelectedTemplate(tpl);
+          if (capturedPhotos.length > 0) {
+            generatePhotoStrip(capturedPhotos, tpl, selectedFilter, customNote, selectedLayout, placedStickers);
+          }
+        }}
+      />
     </main>
   );
 }

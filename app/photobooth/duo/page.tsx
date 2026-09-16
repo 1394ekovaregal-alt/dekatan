@@ -14,56 +14,16 @@ import {
   Users,
   Mic,
   MicOff,
-  LayoutGrid,
-  Rows,
+  Palette,
   Play,
+  SlidersHorizontal,
 } from 'lucide-react';
 import type { DataConnection, MediaConnection } from 'peerjs';
-
-const FRAME_THEMES = {
-  white: {
-    name: 'Putih Bersih',
-    bg: '#FFFFFF',
-    text: '#264653',
-    subText: '#64748B',
-    editionText: '#94A3B8',
-    border: '#F1F5F9',
-    divider: '#F1F5F9',
-    swatchBorder: '#E2E8F0',
-  },
-  black: {
-    name: 'Hitam Retro',
-    bg: '#18181B',
-    text: '#FAF7F2',
-    subText: '#A1A1AA',
-    editionText: '#71717A',
-    border: '#27272A',
-    divider: '#27272A',
-    swatchBorder: '#18181B',
-  },
-  cream: {
-    name: 'Krem Hangat',
-    bg: '#FAF7F2',
-    text: '#264653',
-    subText: '#78716C',
-    editionText: '#A8A29E',
-    border: '#E7E5E4',
-    divider: '#E7E5E4',
-    swatchBorder: '#D6D3D1',
-  },
-  coral: {
-    name: 'Coral Dekatan',
-    bg: '#DA6868',
-    text: '#FFFFFF',
-    subText: '#FFE4E6',
-    editionText: '#FECDD3',
-    border: '#E57373',
-    divider: '#E57373',
-    swatchBorder: '#DA6868',
-  },
-};
-
-type FrameThemeKey = keyof typeof FRAME_THEMES;
+import TemplateSelectorModal, {
+  FrameTemplate,
+  FRAME_TEMPLATES,
+  LayoutMode,
+} from '@/components/TemplateSelectorModal';
 
 const PHOTO_FILTERS = {
   normal: { name: 'Asli', filter: 'none' },
@@ -73,7 +33,6 @@ const PHOTO_FILTERS = {
 } as const;
 
 type PhotoFilterKey = keyof typeof PHOTO_FILTERS;
-type LayoutMode = 'strip4' | 'strip3' | 'grid';
 
 export default function DuoPhotobooth() {
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -85,23 +44,24 @@ export default function DuoPhotobooth() {
   const callRef = useRef<MediaConnection | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
 
-  // Koneksi & Status Ruangan
+  // Koneksi
   const [peerId, setPeerId] = useState<string>('');
   const [targetPeerId, setTargetPeerId] = useState<string>('');
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [isCopied, setIsCopied] = useState<boolean>(false);
-  const [statusMessage, setStatusMessage] = useState<string>('Menyiapkan kode bilik...');
+  const [statusMessage, setStatusMessage] = useState<string>('Menyiapkan koneksi...');
 
   // Kamera & Audio
   const [cameraReady, setCameraReady] = useState(false);
   const [isMicMuted, setIsMicMuted] = useState<boolean>(false);
 
-  // Pengaturan Template & Tema SEBELUM Jepret
+  // Template & Tata Letak
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<FrameTemplate>(FRAME_TEMPLATES[0]);
+  const selectedTemplateRef = useRef<FrameTemplate>(FRAME_TEMPLATES[0]);
+
   const [selectedLayout, setSelectedLayout] = useState<LayoutMode>('strip4');
   const selectedLayoutRef = useRef<LayoutMode>('strip4');
-
-  const [selectedTheme, setSelectedTheme] = useState<FrameThemeKey>('white');
-  const selectedThemeRef = useRef<FrameThemeKey>('white');
 
   const [selectedFilter, setSelectedFilter] = useState<PhotoFilterKey>('normal');
   const selectedFilterRef = useRef<PhotoFilterKey>('normal');
@@ -109,7 +69,7 @@ export default function DuoPhotobooth() {
   const [customNote, setCustomNote] = useState<string>('');
   const customNoteRef = useRef<string>('');
 
-  // Sesi Pemotretan
+  // Status Jepret
   const [isCapturing, setIsCapturing] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [currentShot, setCurrentShot] = useState(0);
@@ -124,12 +84,12 @@ export default function DuoPhotobooth() {
   }, [capturedPhotos]);
 
   useEffect(() => {
-    selectedLayoutRef.current = selectedLayout;
-  }, [selectedLayout]);
+    selectedTemplateRef.current = selectedTemplate;
+  }, [selectedTemplate]);
 
   useEffect(() => {
-    selectedThemeRef.current = selectedTheme;
-  }, [selectedTheme]);
+    selectedLayoutRef.current = selectedLayout;
+  }, [selectedLayout]);
 
   useEffect(() => {
     selectedFilterRef.current = selectedFilter;
@@ -139,7 +99,6 @@ export default function DuoPhotobooth() {
     customNoteRef.current = customNote;
   }, [customNote]);
 
-  // Inisialisasi Audio Efek Suara
   const initAudio = useCallback(() => {
     if (!audioCtxRef.current) {
       const AudioCtx =
@@ -194,9 +153,7 @@ export default function DuoPhotobooth() {
       gain.connect(ctx.destination);
       osc.start();
       osc.stop(ctx.currentTime + 0.15);
-    } catch (e) {
-      console.log('Beep audio error:', e);
-    }
+    } catch (_) {}
   }, [initAudio]);
 
   const playShutterSound = useCallback(() => {
@@ -204,14 +161,12 @@ export default function DuoPhotobooth() {
       initAudio();
       const ctx = audioCtxRef.current;
       if (!ctx) return;
-
       const bufferSize = Math.floor(ctx.sampleRate * 0.1);
       const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const data = buffer.getChannelData(0);
       for (let i = 0; i < bufferSize; i++) {
         data[i] = Math.random() * 2 - 1;
       }
-
       const noise = ctx.createBufferSource();
       noise.buffer = buffer;
       const filter = ctx.createBiquadFilter();
@@ -220,7 +175,6 @@ export default function DuoPhotobooth() {
       const noiseGain = ctx.createGain();
       noiseGain.gain.setValueAtTime(0.6, ctx.currentTime);
       noiseGain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-
       noise.connect(filter);
       filter.connect(noiseGain);
       noiseGain.connect(ctx.destination);
@@ -233,17 +187,13 @@ export default function DuoPhotobooth() {
       osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.05);
       clickGain.gain.setValueAtTime(0.7, ctx.currentTime);
       clickGain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05);
-
       osc.connect(clickGain);
       clickGain.connect(ctx.destination);
       osc.start();
       osc.stop(ctx.currentTime + 0.05);
-    } catch (e) {
-      console.log('Shutter audio error:', e);
-    }
+    } catch (_) {}
   }, [initAudio]);
 
-  // Menyalakan Kamera dan Mikrofon
   const startLocalMedia = useCallback(async () => {
     try {
       if (localStreamRef.current) {
@@ -273,7 +223,6 @@ export default function DuoPhotobooth() {
       setCameraReady(true);
       return stream;
     } catch (err) {
-      console.error('Akses media gagal:', err);
       setStatusMessage('Gagal mengakses kamera/mikrofon.');
       return null;
     }
@@ -289,25 +238,22 @@ export default function DuoPhotobooth() {
     }
   };
 
-  // Logika Render Strip Foto Canvas
+  // Render Strip Foto Kanvas Duo Sesuai Bentuk Frame
   const generateDuoStrip = useCallback(
     async (
       photos: string[],
-      themeKey: FrameThemeKey = selectedThemeRef.current,
+      template: FrameTemplate = selectedTemplateRef.current,
       filterKey: PhotoFilterKey = selectedFilterRef.current,
       note: string = customNoteRef.current,
       layout: LayoutMode = selectedLayoutRef.current
     ) => {
       setIsGeneratingStrip(true);
-
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const theme = FRAME_THEMES[themeKey];
       const isGrid = layout === 'grid';
       const isStrip3 = layout === 'strip3';
-
       const padding = 32;
       const spacing = 18;
       const footerHeight = note.trim() ? 235 : 195;
@@ -340,8 +286,18 @@ export default function DuoPhotobooth() {
       canvas.width = stripWidth;
       canvas.height = totalHeight;
 
-      ctx.fillStyle = theme.bg;
+      ctx.fillStyle = template.bg;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      if (template.pattern === 'film') {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        const holeH = 14;
+        const holeW = 8;
+        for (let y = 15; y < totalHeight - 20; y += 26) {
+          ctx.fillRect(6, y, holeW, holeH);
+          ctx.fillRect(stripWidth - 14, y, holeW, holeH);
+        }
+      }
 
       for (let i = 0; i < renderPhotos.length; i++) {
         const img = new (window as any).Image();
@@ -363,18 +319,62 @@ export default function DuoPhotobooth() {
         }
 
         ctx.save();
+        ctx.beginPath();
+        if (template.slotShape === 'arch') {
+          ctx.roundRect(xPos, yPos, photoWidth, photoHeight, [photoWidth / 2, photoWidth / 2, 8, 8]);
+        } else if (template.slotShape === 'rounded') {
+          ctx.roundRect(xPos, yPos, photoWidth, photoHeight, 16);
+        } else if (template.slotShape === 'heart') {
+          const topCurveHeight = photoHeight * 0.3;
+          ctx.moveTo(xPos + photoWidth / 2, yPos + photoHeight);
+          ctx.bezierCurveTo(
+            xPos,
+            yPos + photoHeight * 0.7,
+            xPos,
+            yPos + topCurveHeight,
+            xPos + photoWidth / 4,
+            yPos
+          );
+          ctx.bezierCurveTo(
+            xPos + photoWidth / 2,
+            yPos,
+            xPos + photoWidth / 2,
+            yPos + topCurveHeight,
+            xPos + photoWidth / 2,
+            yPos + topCurveHeight
+          );
+          ctx.bezierCurveTo(
+            xPos + photoWidth / 2,
+            yPos + topCurveHeight,
+            xPos + photoWidth / 2,
+            yPos,
+            xPos + (photoWidth * 3) / 4,
+            yPos
+          );
+          ctx.bezierCurveTo(
+            xPos + photoWidth,
+            yPos + topCurveHeight,
+            xPos + photoWidth,
+            yPos + photoHeight * 0.7,
+            xPos + photoWidth / 2,
+            yPos + photoHeight
+          );
+        } else {
+          ctx.rect(xPos, yPos, photoWidth, photoHeight);
+        }
+        ctx.clip();
+
         ctx.filter = PHOTO_FILTERS[filterKey].filter;
         ctx.drawImage(img, xPos, yPos, photoWidth, photoHeight);
         ctx.restore();
 
-        ctx.strokeStyle = theme.border;
-        ctx.lineWidth = 2;
-        ctx.strokeRect(xPos, yPos, photoWidth, photoHeight);
+        ctx.strokeStyle = template.slotBorder;
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
       }
 
       const footerStartY = totalHeight - footerHeight;
-
-      ctx.strokeStyle = theme.divider;
+      ctx.strokeStyle = template.border;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(padding + 20, footerStartY + 10);
@@ -388,10 +388,10 @@ export default function DuoPhotobooth() {
         logoImg.onerror = resolve;
       });
 
-      const logoWidth = 190;
+      const logoWidth = 180;
       const logoHeight = logoImg.naturalHeight
         ? (logoImg.naturalHeight / logoImg.naturalWidth) * logoWidth
-        : 52;
+        : 50;
       const logoX = (stripWidth - logoWidth) / 2;
       const logoY = footerStartY + 25;
 
@@ -420,22 +420,14 @@ export default function DuoPhotobooth() {
         currentTextY += 24;
       }
 
-      ctx.font = '500 14px sans-serif';
-      ctx.fillStyle = theme.subText;
+      ctx.font = '500 13px sans-serif';
+      ctx.fillStyle = template.subTextColor;
       ctx.textAlign = 'center';
       ctx.fillText(`${formattedDate} • ${formattedTime} WITA`, stripWidth / 2, currentTextY);
 
-      ctx.font = '12px sans-serif';
-      ctx.fillStyle = theme.editionText;
-      ctx.fillText(
-        isGrid
-          ? 'Duo Photobooth • Edisi Grid (2×2)'
-          : isStrip3
-          ? 'Duo Photobooth • Edisi Strip (1×3)'
-          : 'Duo Photobooth • Edisi Strip (1×4)',
-        stripWidth / 2,
-        currentTextY + 20
-      );
+      ctx.font = '700 12px sans-serif';
+      ctx.fillStyle = template.textColor;
+      ctx.fillText(template.labelFooter || 'DEKATAN DUO', stripWidth / 2, currentTextY + 20);
 
       const dataUrl = canvas.toDataURL('image/png');
       setFinalStripUrl(dataUrl);
@@ -456,7 +448,6 @@ export default function DuoPhotobooth() {
     if (!ctx) return '';
 
     const halfWidth = canvas.width / 2;
-
     ctx.save();
     ctx.translate(halfWidth, 0);
     ctx.scale(-1, 1);
@@ -510,14 +501,14 @@ export default function DuoPhotobooth() {
     setIsCapturing(false);
     generateDuoStrip(
       tempPhotos,
-      selectedThemeRef.current,
+      selectedTemplateRef.current,
       selectedFilterRef.current,
       customNoteRef.current,
       selectedLayoutRef.current
     );
   }, [initAudio, playBeepSound, playShutterSound, generateDuoStrip]);
 
-  // Sinkronisasi Sinyal Dua Arah Antar-Perangkat
+  // Sinkronisasi Sinyal Dua Arah
   const setupDataConnection = useCallback(
     (conn: DataConnection) => {
       conn.on('open', () => {
@@ -534,16 +525,37 @@ export default function DuoPhotobooth() {
         ) {
           setSelectedLayout(data.layout);
           selectedLayoutRef.current = data.layout;
-        } else if (data?.type === 'THEME_CHANGE' && data?.theme) {
-          setSelectedTheme(data.theme);
-          selectedThemeRef.current = data.theme;
+          if (capturedPhotosRef.current.length > 0) {
+            generateDuoStrip(
+              capturedPhotosRef.current,
+              selectedTemplateRef.current,
+              selectedFilterRef.current,
+              customNoteRef.current,
+              data.layout
+            );
+          }
+        } else if (data?.type === 'TEMPLATE_CHANGE' && data?.templateId) {
+          const found = FRAME_TEMPLATES.find((t) => t.id === data.templateId);
+          if (found) {
+            setSelectedTemplate(found);
+            selectedTemplateRef.current = found;
+            if (capturedPhotosRef.current.length > 0) {
+              generateDuoStrip(
+                capturedPhotosRef.current,
+                found,
+                selectedFilterRef.current,
+                customNoteRef.current,
+                selectedLayoutRef.current
+              );
+            }
+          }
         } else if (data?.type === 'FILTER_CHANGE' && data?.filter) {
           setSelectedFilter(data.filter);
           selectedFilterRef.current = data.filter;
           if (capturedPhotosRef.current.length > 0) {
             generateDuoStrip(
               capturedPhotosRef.current,
-              selectedThemeRef.current,
+              selectedTemplateRef.current,
               data.filter,
               customNoteRef.current,
               selectedLayoutRef.current
@@ -555,7 +567,7 @@ export default function DuoPhotobooth() {
           if (capturedPhotosRef.current.length > 0) {
             generateDuoStrip(
               capturedPhotosRef.current,
-              selectedThemeRef.current,
+              selectedTemplateRef.current,
               selectedFilterRef.current,
               data.note,
               selectedLayoutRef.current
@@ -629,7 +641,6 @@ export default function DuoPhotobooth() {
 
   const handleConnectToPartner = () => {
     if (!targetPeerId || !peerRef.current || !localStreamRef.current) return;
-
     setStatusMessage('Menyambungkan ke pasangan...');
     const fullTargetId = `dekatan-${targetPeerId.trim().toUpperCase()}`;
 
@@ -662,16 +673,22 @@ export default function DuoPhotobooth() {
   const handleLayoutChange = (newLayout: LayoutMode) => {
     setSelectedLayout(newLayout);
     selectedLayoutRef.current = newLayout;
+    if (capturedPhotos.length > 0) {
+      generateDuoStrip(capturedPhotos, selectedTemplate, selectedFilter, customNote, newLayout);
+    }
     if (connRef.current) {
       connRef.current.send({ type: 'LAYOUT_CHANGE', layout: newLayout });
     }
   };
 
-  const handleThemeChange = (newTheme: FrameThemeKey) => {
-    setSelectedTheme(newTheme);
-    selectedThemeRef.current = newTheme;
+  const handleTemplateChange = (tpl: FrameTemplate) => {
+    setSelectedTemplate(tpl);
+    selectedTemplateRef.current = tpl;
+    if (capturedPhotos.length > 0) {
+      generateDuoStrip(capturedPhotos, tpl, selectedFilter, customNote, selectedLayout);
+    }
     if (connRef.current) {
-      connRef.current.send({ type: 'THEME_CHANGE', theme: newTheme });
+      connRef.current.send({ type: 'TEMPLATE_CHANGE', templateId: tpl.id });
     }
   };
 
@@ -687,7 +704,7 @@ export default function DuoPhotobooth() {
     setSelectedFilter(newFilter);
     selectedFilterRef.current = newFilter;
     if (capturedPhotos.length > 0) {
-      generateDuoStrip(capturedPhotos, selectedTheme, newFilter, customNote, selectedLayout);
+      generateDuoStrip(capturedPhotos, selectedTemplate, newFilter, customNote, selectedLayout);
     }
     if (connRef.current) {
       connRef.current.send({ type: 'FILTER_CHANGE', filter: newFilter });
@@ -698,7 +715,7 @@ export default function DuoPhotobooth() {
     setCustomNote(text);
     customNoteRef.current = text;
     if (capturedPhotos.length > 0) {
-      generateDuoStrip(capturedPhotos, selectedTheme, selectedFilter, text, selectedLayout);
+      generateDuoStrip(capturedPhotos, selectedTemplate, selectedFilter, text, selectedLayout);
     }
     if (connRef.current) {
       connRef.current.send({ type: 'NOTE_CHANGE', note: text });
@@ -707,8 +724,7 @@ export default function DuoPhotobooth() {
 
   const handleDownload = async () => {
     if (!finalStripUrl) return;
-
-    const fileName = `dekatan-duo-${selectedLayout}-${selectedTheme}-${Date.now()}.png`;
+    const fileName = `dekatan-duo-${selectedTemplate.id}-${Date.now()}.png`;
 
     try {
       const response = await fetch(finalStripUrl);
@@ -723,9 +739,7 @@ export default function DuoPhotobooth() {
         });
         return;
       }
-    } catch (error) {
-      console.log('Web Share dibatalkan:', error);
-    }
+    } catch (_) {}
 
     const link = document.createElement('a');
     link.download = fileName;
@@ -743,7 +757,7 @@ export default function DuoPhotobooth() {
 
   return (
     <main className="min-h-screen bg-[#FAF7F2] text-[#264653] flex flex-col items-center px-4 py-5 md:py-8">
-      {/* HEADER ATAS */}
+      {/* Header */}
       <div className="w-full max-w-2xl flex items-center justify-between mb-4">
         <Link
           href="/"
@@ -763,7 +777,7 @@ export default function DuoPhotobooth() {
         </div>
       </div>
 
-      {/* TAHAP 1: LOBBY MASUKKAN KODE (Jika belum tersambung) */}
+      {/* Tahap 1: Lobi Sambungan */}
       {!isConnected && !finalStripUrl && (
         <div className="w-full max-w-md bg-white rounded-3xl p-5 md:p-6 shadow-sm border border-stone-200 mb-5 animate-fade-in">
           <h2 className="text-sm md:text-base font-bold text-stone-800 mb-1">Sambungkan ke Pasangan</h2>
@@ -808,12 +822,10 @@ export default function DuoPhotobooth() {
         </div>
       )}
 
-      {/* TAHAP 2 & 3: BOOTH SETUP & LIVE CAMERA (Sebelum & Saat Foto) */}
+      {/* Tahap 2: Live Camera & Pilihan Frame Fremio */}
       {!finalStripUrl && (
         <div className="w-full max-w-md flex flex-col items-center">
-          {/* TAMPILAN KAMERA DUA SISI */}
           <div className="relative w-full aspect-[4/3] bg-stone-900 rounded-3xl overflow-hidden shadow-xl border-4 border-white grid grid-cols-2 divide-x-2 divide-white/40">
-            {/* Kamera Kamu */}
             <div className="relative w-full h-full bg-stone-800 overflow-hidden">
               <video
                 ref={localVideoRef}
@@ -827,7 +839,6 @@ export default function DuoPhotobooth() {
               </span>
             </div>
 
-            {/* Kamera Pasangan */}
             <div className="relative w-full h-full bg-stone-800 overflow-hidden flex items-center justify-center">
               <video
                 ref={remoteVideoRef}
@@ -847,9 +858,7 @@ export default function DuoPhotobooth() {
               )}
             </div>
 
-            {/* Flash & Countdown */}
             {showFlash && <div className="absolute inset-0 bg-white animate-fade-out z-20" />}
-
             {countdown !== null && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[2px] z-10">
                 <span className="text-8xl font-black text-white drop-shadow-lg animate-pulse">
@@ -857,7 +866,6 @@ export default function DuoPhotobooth() {
                 </span>
               </div>
             )}
-
             {isCapturing && (
               <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-white text-xs font-medium z-10">
                 Foto {currentShot}/{totalShotsRequired}
@@ -865,8 +873,7 @@ export default function DuoPhotobooth() {
             )}
           </div>
 
-          {/* BAR STATUS & KONTROL AUDIO */}
-          <div className="w-full flex items-center justify-between my-3 px-1">
+          <div className="w-full flex items-center justify-between my-2.5 px-1">
             <div className="flex items-center gap-1.5">
               <span
                 className={`w-2.5 h-2.5 rounded-full ${
@@ -891,121 +898,27 @@ export default function DuoPhotobooth() {
             </button>
           </div>
 
-          {/* PANEL PILIHAN TEMPLATE & PRATINJAU STRIP KOSONG (Hanya tampil saat belum jepret) */}
-          {!isCapturing && isConnected && (
-            <div className="w-full bg-white rounded-3xl p-4 shadow-sm border border-stone-200 mb-4 animate-fade-in">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-bold text-stone-700 uppercase tracking-wide">
-                  Pilih Template Bersama
+          {/* Tombol Pemilih Template Fremio Berdua */}
+          {isConnected && !isCapturing && (
+            <button
+              onClick={() => setIsTemplateModalOpen(true)}
+              className="w-full mb-3 py-2.5 px-4 bg-white border border-stone-200 rounded-2xl shadow-xs flex items-center justify-between text-xs font-semibold text-stone-700 hover:border-[#DA6868] active:scale-95 transition animate-fade-in"
+            >
+              <div className="flex items-center gap-2">
+                <Palette className="w-4 h-4 text-[#DA6868]" />
+                <span>
+                  Desain Frame:{' '}
+                  <strong className="text-[#DA6868]">
+                    {selectedTemplate.name} ({selectedLayout === 'grid' ? 'Grid 2×2' : selectedLayout === 'strip3' ? '1×3' : '1×4'})
+                  </strong>
                 </span>
-                <span className="text-[10px] bg-rose-50 text-[#DA6868] px-2 py-0.5 rounded-full font-medium border border-rose-100">
-                  Tersinkron Berdua
-                </span>
               </div>
-
-              {/* Pilihan Bentuk Template */}
-              <div className="grid grid-cols-3 gap-1.5 mb-3">
-                <button
-                  onClick={() => handleLayoutChange('strip4')}
-                  className={`py-2 px-1 rounded-xl text-xs font-medium flex flex-col items-center gap-1 transition ${
-                    selectedLayout === 'strip4'
-                      ? 'bg-[#DA6868] text-white shadow-xs'
-                      : 'bg-stone-50 text-stone-600 hover:bg-stone-100'
-                  }`}
-                >
-                  <Rows className="w-4 h-4" />
-                  <span>Strip 1×4</span>
-                </button>
-                <button
-                  onClick={() => handleLayoutChange('strip3')}
-                  className={`py-2 px-1 rounded-xl text-xs font-medium flex flex-col items-center gap-1 transition ${
-                    selectedLayout === 'strip3'
-                      ? 'bg-[#DA6868] text-white shadow-xs'
-                      : 'bg-stone-50 text-stone-600 hover:bg-stone-100'
-                  }`}
-                >
-                  <Rows className="w-4 h-4" />
-                  <span>Strip 1×3</span>
-                </button>
-                <button
-                  onClick={() => handleLayoutChange('grid')}
-                  className={`py-2 px-1 rounded-xl text-xs font-medium flex flex-col items-center gap-1 transition ${
-                    selectedLayout === 'grid'
-                      ? 'bg-[#DA6868] text-white shadow-xs'
-                      : 'bg-stone-50 text-stone-600 hover:bg-stone-100'
-                  }`}
-                >
-                  <LayoutGrid className="w-4 h-4" />
-                  <span>Grid 2×2</span>
-                </button>
-              </div>
-
-              {/* Pilihan Warna Bingkai */}
-              <div className="flex items-center justify-between pt-2 border-t border-stone-100 mb-4">
-                <span className="text-xs font-medium text-stone-500">Warna Frame:</span>
-                <div className="flex items-center gap-2">
-                  {(Object.keys(FRAME_THEMES) as FrameThemeKey[]).map((key) => {
-                    const theme = FRAME_THEMES[key];
-                    const isSelected = selectedTheme === key;
-                    return (
-                      <button
-                        key={key}
-                        onClick={() => handleThemeChange(key)}
-                        className={`w-6 h-6 rounded-full transition-all border-2 touch-manipulation flex items-center justify-center ${
-                          isSelected
-                            ? 'scale-110 ring-2 ring-[#DA6868] ring-offset-2'
-                            : 'hover:scale-105 opacity-85'
-                        }`}
-                        style={{ backgroundColor: theme.bg, borderColor: theme.swatchBorder }}
-                        title={theme.name}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* PRATINJAU STRIP KOSONG (Slot Placeholder ala Momoto) */}
-              <div className="flex flex-col items-center pt-2 border-t border-stone-100">
-                <span className="text-[11px] font-semibold text-stone-400 mb-2">
-                  Pratinjau Kertas ({selectedLayout === 'grid' ? 'Grid 2×2' : selectedLayout === 'strip3' ? 'Strip 1×3' : 'Strip 1×4'})
-                </span>
-
-                <div
-                  className="p-3 rounded-xl shadow-inner transition-all duration-300"
-                  style={{
-                    backgroundColor: FRAME_THEMES[selectedTheme].bg,
-                    border: `1.5px solid ${FRAME_THEMES[selectedTheme].swatchBorder}`,
-                    width: selectedLayout === 'grid' ? '180px' : '120px',
-                  }}
-                >
-                  <div
-                    className={`grid gap-1.5 ${
-                      selectedLayout === 'grid' ? 'grid-cols-2' : 'grid-cols-1'
-                    }`}
-                  >
-                    {Array.from({ length: totalShotsRequired }).map((_, idx) => (
-                      <div
-                        key={idx}
-                        className="aspect-[4/3] rounded-md border border-dashed border-stone-300 bg-stone-100/70 flex items-center justify-center text-xs font-bold text-stone-400"
-                      >
-                        {idx + 1}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-2 text-center">
-                    <span
-                      className="text-[8px] font-bold tracking-widest uppercase opacity-60"
-                      style={{ color: FRAME_THEMES[selectedTheme].text }}
-                    >
-                      DEKATAN
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
+              <span className="text-[11px] bg-rose-50 text-[#DA6868] px-2 py-0.5 rounded-full font-medium border border-rose-100">
+                Pilih Frame Bersama →
+              </span>
+            </button>
           )}
 
-          {/* TOMBOL MULAI SESI */}
           <div className="w-full">
             <button
               onClick={handleTriggerSession}
@@ -1039,7 +952,7 @@ export default function DuoPhotobooth() {
         </div>
       )}
 
-      {/* TAHAP 4: PRATINJAU HASIL & PENGATURAN AKHIR (Setelah Jepret Selesai) */}
+      {/* Tahap 3: Pratinjau Strip Berdua */}
       {finalStripUrl && (
         <div className="w-full max-w-md flex flex-col items-center animate-fade-in">
           <div className="flex items-center gap-2 text-stone-600 mb-2.5 text-sm font-semibold">
@@ -1047,9 +960,23 @@ export default function DuoPhotobooth() {
             Strip Foto Berdua Sudah Jadi!
           </div>
 
-          {/* PEMILIH FILTER ESTETIK */}
-          <div className="flex items-center gap-1.5 mb-2.5 bg-white px-3 py-1.5 rounded-2xl shadow-xs border border-stone-200">
-            <span className="text-xs font-semibold text-stone-500 mr-1.5">Filter:</span>
+          <button
+            onClick={() => setIsTemplateModalOpen(true)}
+            className="w-full mb-3 py-2.5 px-4 bg-white border border-stone-200 rounded-2xl shadow-xs flex items-center justify-between text-xs font-semibold text-stone-700 hover:border-[#DA6868] active:scale-95 transition"
+          >
+            <div className="flex items-center gap-2">
+              <Palette className="w-4 h-4 text-[#DA6868]" />
+              <span>
+                Ganti Frame:{' '}
+                <strong className="text-[#DA6868]">{selectedTemplate.name}</strong>
+              </span>
+            </div>
+            <span className="text-[11px] text-stone-400">Ubah Desain →</span>
+          </button>
+
+          {/* Filter Bar */}
+          <div className="flex items-center justify-center gap-1.5 mb-3 bg-white px-3 py-2 rounded-2xl shadow-xs border border-stone-200 w-full">
+            <SlidersHorizontal className="w-3.5 h-3.5 text-stone-500 mr-1" />
             {(Object.keys(PHOTO_FILTERS) as PhotoFilterKey[]).map((key) => {
               const item = PHOTO_FILTERS[key];
               const isSelected = selectedFilter === key;
@@ -1069,8 +996,8 @@ export default function DuoPhotobooth() {
             })}
           </div>
 
-          {/* INPUT PESAN PRIBADI */}
-          <div className="w-full bg-white p-3 rounded-2xl shadow-xs border border-stone-200 mb-4">
+          {/* Catatan Singkat */}
+          <div className="w-full bg-white p-3 rounded-2xl shadow-xs border border-stone-200 mb-3">
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs font-semibold text-stone-600">
                 Catatan Berdua / Nama Kalian:
@@ -1082,18 +1009,14 @@ export default function DuoPhotobooth() {
             <input
               type="text"
               maxLength={40}
-              placeholder="Contoh: Nama anda & Pasangan — Jarak Bukan Halangan"
+              placeholder="Contoh: Eko & Pasangan — Jarak Bukan Halangan"
               value={customNote}
               onChange={(e) => handleNoteChange(e.target.value)}
               className="w-full px-3 py-2 text-xs rounded-xl border border-stone-200 focus:outline-none focus:border-[#DA6868] text-stone-700 placeholder:text-stone-400"
             />
-            <div className="flex justify-between items-center mt-1">
-              <span className="text-[10px] text-stone-400">Tercetak langsung di strip foto</span>
-              <span className="text-[10px] text-stone-400">{customNote.length}/40</span>
-            </div>
           </div>
 
-          {/* PRATINJAU KERTAS STRIP ASLI */}
+          {/* Gambar Akhir */}
           <div
             className={`p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 ${
               selectedLayout === 'grid'
@@ -1107,14 +1030,13 @@ export default function DuoPhotobooth() {
             <img src={finalStripUrl} alt="Hasil Foto Berdua" className="w-full h-auto rounded-lg shadow-inner" />
           </div>
 
-          {/* TOMBOL UNDUH & RETAKE */}
-          <div className="w-full flex flex-col gap-3 mt-6">
+          <div className="w-full flex flex-col gap-3 mt-5">
             <button
               onClick={handleDownload}
               className="w-full py-3.5 bg-[#DA6868] text-white font-bold rounded-xl shadow-md hover:bg-[#c85656] active:scale-95 touch-manipulation flex items-center justify-center gap-2 transition"
             >
               <Download className="w-5 h-5" />
-              Simpan / Bagikan Foto ({FRAME_THEMES[selectedTheme].name})
+              Simpan / Bagikan Foto Strip ({selectedTemplate.name})
             </button>
 
             <button
@@ -1122,11 +1044,21 @@ export default function DuoPhotobooth() {
               className="w-full py-3.5 bg-white text-slate-700 font-semibold rounded-xl border border-stone-300 hover:bg-stone-50 active:scale-95 touch-manipulation flex items-center justify-center gap-2 transition"
             >
               <RefreshCw className="w-4 h-4" />
-              Ganti Template / Foto Ulang
+              Foto Ulang
             </button>
           </div>
         </div>
       )}
+
+      {/* Modal Katalog Fremio untuk Mode Duo */}
+      <TemplateSelectorModal
+        isOpen={isTemplateModalOpen}
+        onClose={() => setIsTemplateModalOpen(false)}
+        selectedTemplateId={selectedTemplate.id}
+        selectedLayout={selectedLayout}
+        onSelectLayout={(layout) => handleLayoutChange(layout)}
+        onSelectTemplate={(tpl) => handleTemplateChange(tpl)}
+      />
     </main>
   );
 }
