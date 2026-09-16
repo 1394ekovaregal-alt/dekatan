@@ -891,7 +891,7 @@ export default function DuoPhotobooth() {
             <input
               type="text"
               maxLength={40}
-              placeholder="Contoh: Eko & Pasangan — Jarak Bukan Halangan"
+              placeholder="Contoh: Nama anda & Pasangan — Jarak Bukan Halangan"
               value={customNote}
               onChange={(e) => handleNoteChange(e.target.value)}
               className="w-full px-3 py-2 text-xs rounded-xl border border-stone-200 focus:outline-none focus:border-[#DA6868] text-stone-700 placeholder:text-stone-400"
