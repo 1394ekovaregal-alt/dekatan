@@ -14,6 +14,9 @@ import {
   Smile,
   SlidersHorizontal,
   X,
+  Maximize2,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 
 const FRAME_THEMES = {
@@ -76,8 +79,9 @@ const AVAILABLE_STICKERS = [
 interface PlacedSticker {
   id: string;
   emoji: string;
-  x: number; // Persentase koordinat (0 - 100%)
-  y: number; // Persentase koordinat (0 - 100%)
+  x: number; // Persentase koordinat horizontal (0 - 100%)
+  y: number; // Persentase koordinat vertikal (0 - 100%)
+  scale: number; // Faktor skala ukuran (0.6 - 2.5)
 }
 
 export default function SoloPhotobooth() {
@@ -101,10 +105,17 @@ export default function SoloPhotobooth() {
   const [selectedLayout, setSelectedLayout] = useState<LayoutMode>('strip4');
   const [customNote, setCustomNote] = useState<string>('');
 
-  // Tab Pengaturan & Stiker
+  // Tab & Stiker Interaktif
   const [activeTab, setActiveTab] = useState<'filter' | 'stiker'>('filter');
   const [placedStickers, setPlacedStickers] = useState<PlacedSticker[]>([]);
+  const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
   const [activeDraggingId, setActiveDraggingId] = useState<string | null>(null);
+  const [resizeState, setResizeState] = useState<{
+    id: string;
+    startX: number;
+    startY: number;
+    initialScale: number;
+  } | null>(null);
 
   const initAudio = useCallback(() => {
     if (!audioCtxRef.current) {
@@ -455,14 +466,15 @@ export default function SoloPhotobooth() {
         currentTextY + 20
       );
 
-      // CETAK STIKER DIGITAL KE ATAS KANVAS
+      // CETAK STIKER DIGITAL BESERTA SKALA UKURANNYA KE KANVAS
       if (stickersToDraw && stickersToDraw.length > 0) {
-        ctx.font = '36px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         for (const stk of stickersToDraw) {
           const pixelX = (stk.x / 100) * stripWidth;
           const pixelY = (stk.y / 100) * totalHeight;
+          const dynamicFontSize = Math.round(38 * (stk.scale || 1));
+          ctx.font = `${dynamicFontSize}px sans-serif`;
           ctx.fillText(stk.emoji, pixelX, pixelY);
         }
       }
@@ -481,6 +493,7 @@ export default function SoloPhotobooth() {
     setCapturedPhotos([]);
     setFinalStripUrl(null);
     setPlacedStickers([]);
+    setSelectedStickerId(null);
 
     const tempPhotos: string[] = [];
 
@@ -539,31 +552,39 @@ export default function SoloPhotobooth() {
     }
   };
 
-  // LOGIKA STIKER INTERAKTIF
+  // LOGIKA STIKER: TAMBAH, GESER, DAN UBAH UKURAN
   const handleAddSticker = (emoji: string) => {
+    const newId = `${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
     const newSticker: PlacedSticker = {
-      id: `${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+      id: newId,
       emoji,
       x: 50,
-      y: 35 + (placedStickers.length % 4) * 12,
+      y: 35 + (placedStickers.length % 4) * 10,
+      scale: 1.0,
     };
     const updated = [...placedStickers, newSticker];
     setPlacedStickers(updated);
+    setSelectedStickerId(newId);
   };
 
   const handleRemoveSticker = (id: string, e: React.MouseEvent | React.TouchEvent) => {
     e.stopPropagation();
     const updated = placedStickers.filter((s) => s.id !== id);
     setPlacedStickers(updated);
+    if (selectedStickerId === id) setSelectedStickerId(null);
   };
 
-  // Menggeser Stiker dengan Pointer (Mouse / Sentuhan Jari)
-  const handlePointerDown = (id: string) => {
+  // 1. Geser Posisi Stiker
+  const handleStickerPointerDown = (e: React.PointerEvent, id: string) => {
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
     setActiveDraggingId(id);
+    setSelectedStickerId(id);
   };
 
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!activeDraggingId || !previewContainerRef.current) return;
+  const handleStickerPointerMove = (e: React.PointerEvent, id: string) => {
+    if (activeDraggingId !== id || !previewContainerRef.current) return;
+    e.stopPropagation();
 
     const rect = previewContainerRef.current.getBoundingClientRect();
     const touchX = e.clientX - rect.left;
@@ -573,18 +594,64 @@ export default function SoloPhotobooth() {
     const pctY = Math.max(5, Math.min(95, (touchY / rect.height) * 100));
 
     setPlacedStickers((prev) =>
-      prev.map((s) => (s.id === activeDraggingId ? { ...s, x: pctX, y: pctY } : s))
+      prev.map((s) => (s.id === id ? { ...s, x: pctX, y: pctY } : s))
     );
   };
 
-  const handlePointerUp = () => {
+  const handleStickerPointerUp = (e: React.PointerEvent) => {
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch (_) {}
     setActiveDraggingId(null);
+  };
+
+  // 2. Gagang Sudut Ubah Ukuran (Corner Resize Handle)
+  const handleResizeHandleDown = (e: React.PointerEvent, id: string, initialScale: number) => {
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    setResizeState({
+      id,
+      startX: e.clientX,
+      startY: e.clientY,
+      initialScale: initialScale || 1.0,
+    });
+    setSelectedStickerId(id);
+  };
+
+  const handleResizeHandleMove = (e: React.PointerEvent) => {
+    if (!resizeState) return;
+    e.stopPropagation();
+
+    const delta = (e.clientX - resizeState.startX) + (e.clientY - resizeState.startY);
+    const newScale = Math.max(0.5, Math.min(2.5, Number((resizeState.initialScale + delta * 0.012).toFixed(2))));
+
+    setPlacedStickers((prev) =>
+      prev.map((s) => (s.id === resizeState.id ? { ...s, scale: newScale } : s))
+    );
+  };
+
+  const handleResizeHandleUp = (e: React.PointerEvent) => {
+    if (!resizeState) return;
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch (_) {}
+    setResizeState(null);
+  };
+
+  // 3. Tombol Tambah/Kurang Skala Cepat
+  const adjustStickerScale = (id: string, step: number) => {
+    setPlacedStickers((prev) =>
+      prev.map((s) =>
+        s.id === id
+          ? { ...s, scale: Math.max(0.5, Math.min(2.5, Number(((s.scale || 1.0) + step).toFixed(2)))) }
+          : s
+      )
+    );
   };
 
   const handleDownload = async () => {
     if (capturedPhotos.length === 0) return;
 
-    // Pastikan seluruh stiker tercetak rapi ke kanvas sebelum diunduh
     await generatePhotoStrip(
       capturedPhotos,
       selectedTheme,
@@ -626,9 +693,12 @@ export default function SoloPhotobooth() {
     setFinalStripUrl(null);
     setCapturedPhotos([]);
     setPlacedStickers([]);
+    setSelectedStickerId(null);
     setCurrentShot(0);
     startCamera();
   };
+
+  const currentSelectedSticker = placedStickers.find((s) => s.id === selectedStickerId);
 
   return (
     <main className="min-h-screen bg-[#FAF7F2] text-[#264653] flex flex-col items-center px-4 py-5 md:py-10">
@@ -776,7 +846,7 @@ export default function SoloPhotobooth() {
             </button>
           </div>
 
-          {/* TAB BERALIH: FILTER ATAU STIKER (GAYA MOMOTO) */}
+          {/* TAB: FILTER ATAU STIKER */}
           <div className="w-full bg-stone-200/70 p-1 rounded-2xl flex gap-1 mb-2.5">
             <button
               onClick={() => setActiveTab('filter')}
@@ -854,18 +924,22 @@ export default function SoloPhotobooth() {
             <div className="w-full bg-white p-3 rounded-2xl shadow-xs border border-stone-200 mb-3 animate-fade-in">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[11px] font-semibold text-stone-600">
-                  Ketuk untuk menempel, lalu seret di atas foto:
+                  Ketuk emoji untuk menempel ke foto:
                 </span>
                 {placedStickers.length > 0 && (
                   <button
-                    onClick={() => setPlacedStickers([])}
+                    onClick={() => {
+                      setPlacedStickers([]);
+                      setSelectedStickerId(null);
+                    }}
                     className="text-[10px] text-red-500 font-medium hover:underline"
                   >
                     Hapus Semua
                   </button>
                 )}
               </div>
-              <div className="grid grid-cols-6 gap-2">
+
+              <div className="grid grid-cols-6 gap-2 mb-3">
                 {AVAILABLE_STICKERS.map((emoji, idx) => (
                   <button
                     key={idx}
@@ -876,6 +950,34 @@ export default function SoloPhotobooth() {
                   </button>
                 ))}
               </div>
+
+              {/* PANEL KONTROL UKURAN STIKER AKTIF */}
+              {currentSelectedSticker && (
+                <div className="bg-rose-50/70 p-2.5 rounded-xl border border-rose-100 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">{currentSelectedSticker.emoji}</span>
+                    <span className="text-xs font-semibold text-stone-700">
+                      Ukuran: {Math.round(currentSelectedSticker.scale * 100)}%
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => adjustStickerScale(currentSelectedSticker.id, -0.2)}
+                      className="p-1.5 bg-white text-stone-700 rounded-lg border border-stone-200 hover:bg-stone-50 active:scale-95 transition"
+                      title="Perkecil"
+                    >
+                      <ZoomOut className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => adjustStickerScale(currentSelectedSticker.id, 0.2)}
+                      className="p-1.5 bg-white text-stone-700 rounded-lg border border-stone-200 hover:bg-stone-50 active:scale-95 transition"
+                      title="Perbesar"
+                    >
+                      <ZoomIn className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -894,12 +996,11 @@ export default function SoloPhotobooth() {
             />
           </div>
 
-          {/* PRATINJAU KERTAS STRIP + LAPISAN STIKER GESER (DRAGGABLE) */}
+          {/* PRATINJAU KERTAS STRIP + LAPISAN STIKER (BISA DISCROLL + BISA DIUBAH UKURAN) */}
           <div
             ref={previewContainerRef}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            className={`relative select-none touch-none p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 ${
+            onClick={() => setSelectedStickerId(null)}
+            className={`relative select-none p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 touch-pan-y ${
               selectedLayout === 'grid'
                 ? 'max-w-[320px]'
                 : selectedLayout === 'strip3'
@@ -907,43 +1008,78 @@ export default function SoloPhotobooth() {
                 : 'max-w-[270px]'
             }`}
           >
-            {/* Gambar Dasar Strip Foto */}
             {/* eslint-disable-next-html-element/no-img-element */}
             <img
               src={finalStripUrl}
               alt="Hasil Photobooth"
-              className="w-full h-auto rounded-lg shadow-inner pointer-events-none"
+              className="w-full h-auto rounded-lg shadow-inner pointer-events-none select-none touch-pan-y"
             />
 
-            {/* Lapisan Stiker yang Bisa Ditarik dengan Sentuhan Jari */}
-            {placedStickers.map((stk) => (
-              <div
-                key={stk.id}
-                onPointerDown={() => handlePointerDown(stk.id)}
-                style={{
-                  left: `${stk.x}%`,
-                  top: `${stk.y}%`,
-                  transform: 'translate(-50%, -50%)',
-                }}
-                className={`absolute cursor-move text-3xl touch-manipulation transition-transform ${
-                  activeDraggingId === stk.id ? 'scale-125 z-30 drop-shadow-lg' : 'z-20 hover:scale-110'
-                }`}
-              >
-                <span>{stk.emoji}</span>
-                {/* Tombol Hapus Kecil di Setiap Stiker */}
-                <button
-                  onClick={(e) => handleRemoveSticker(stk.id, e)}
-                  className="absolute -top-1 -right-1 bg-black/60 text-white rounded-full p-0.5 hover:bg-red-500 transition"
+            {/* Lapisan Stiker yang Bisa Digeser dan Diubah Ukurannya */}
+            {placedStickers.map((stk) => {
+              const isSelected = selectedStickerId === stk.id;
+              const scale = stk.scale || 1.0;
+
+              return (
+                <div
+                  key={stk.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedStickerId(stk.id);
+                  }}
+                  onPointerDown={(e) => handleStickerPointerDown(e, stk.id)}
+                  onPointerMove={(e) => handleStickerPointerMove(e, stk.id)}
+                  onPointerUp={handleStickerPointerUp}
+                  onPointerCancel={handleStickerPointerUp}
+                  style={{
+                    left: `${stk.x}%`,
+                    top: `${stk.y}%`,
+                    transform: `translate(-50%, -50%) scale(${scale})`,
+                  }}
+                  className={`absolute text-3xl touch-none select-none cursor-grab active:cursor-grabbing ${
+                    activeDraggingId === stk.id ? 'z-30 drop-shadow-xl' : isSelected ? 'z-25' : 'z-20'
+                  }`}
                 >
-                  <X className="w-2.5 h-2.5" />
-                </button>
-              </div>
-            ))}
+                  <div
+                    className={`relative p-1.5 transition-all ${
+                      isSelected || activeDraggingId === stk.id
+                        ? 'ring-2 ring-dashed ring-[#DA6868] rounded-xl bg-white/40 backdrop-blur-[1px]'
+                        : ''
+                    }`}
+                  >
+                    <span>{stk.emoji}</span>
+
+                    {/* Tombol Hapus Kecil */}
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => handleRemoveSticker(stk.id, e)}
+                      className="absolute -top-2 -right-2 bg-stone-900/80 text-white rounded-full p-0.5 hover:bg-red-500 transition shadow-sm"
+                      title="Hapus"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+
+                    {/* Gagang Sudut Ubah Ukuran (Corner Resize Handle) */}
+                    <div
+                      onPointerDown={(e) => handleResizeHandleDown(e, stk.id, scale)}
+                      onPointerMove={handleResizeHandleMove}
+                      onPointerUp={handleResizeHandleUp}
+                      onPointerCancel={handleResizeHandleUp}
+                      className="absolute -bottom-2 -right-2 w-5 h-5 bg-[#DA6868] text-white rounded-full flex items-center justify-center cursor-se-resize shadow-md active:scale-125 touch-none"
+                      title="Tarik sudut untuk membesarkan/mengecilkan"
+                    >
+                      <Maximize2 className="w-2.5 h-2.5" />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           {placedStickers.length > 0 && (
             <p className="text-[11px] text-stone-500 mt-2 text-center">
-              💡 Sentuh dan geser stiker untuk mengatur posisinya sebelum disimpan.
+              💡 Seret stiker untuk pindah posisi, atau tarik titik merah di sudutnya untuk mengatur ukuran.
             </p>
           )}
 
