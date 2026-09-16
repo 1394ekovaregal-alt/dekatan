@@ -82,7 +82,6 @@ export default function DuoPhotobooth() {
   const [isGeneratingStrip, setIsGeneratingStrip] = useState(false);
   const [showFlash, setShowFlash] = useState(false);
 
-  // Fitur Audio Panggilan (Mic Mute / Unmute)
   const [isMicMuted, setIsMicMuted] = useState<boolean>(false);
 
   const [selectedTheme, setSelectedTheme] = useState<FrameThemeKey>('white');
@@ -222,7 +221,6 @@ export default function DuoPhotobooth() {
     }
   }, [initAudio]);
 
-  // Buka Akses Kamera DAN Mikrofon untuk Panggilan Suara
   const startLocalMedia = useCallback(async () => {
     try {
       if (localStreamRef.current) {
@@ -232,7 +230,7 @@ export default function DuoPhotobooth() {
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user' },
+          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } },
           audio: { echoCancellation: true, noiseSuppression: true },
         });
       } catch {
@@ -252,7 +250,7 @@ export default function DuoPhotobooth() {
       setCameraReady(true);
       return stream;
     } catch (err) {
-      console.error('Akses perangkat media gagal:', err);
+      console.error('Akses media gagal:', err);
       setStatusMessage('Gagal mengakses kamera/mikrofon.');
       return null;
     }
@@ -634,10 +632,30 @@ export default function DuoPhotobooth() {
     }
   };
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (!finalStripUrl) return;
+
+    const fileName = `dekatan-duo-${selectedTheme}-${Date.now()}.png`;
+
+    try {
+      const response = await fetch(finalStripUrl);
+      const blob = await response.blob();
+      const file = new File([blob], fileName, { type: 'image/png' });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: 'Foto Strip Dekatan Duo',
+          text: 'Strip kenangan jarak jauh dari Dekatan Photobooth 💕',
+        });
+        return;
+      }
+    } catch (error) {
+      console.log('Web Share dibatalkan atau tidak didukung:', error);
+    }
+
     const link = document.createElement('a');
-    link.download = `dekatan-duo-${selectedTheme}-${selectedFilter}-${Date.now()}.png`;
+    link.download = fileName;
     link.href = finalStripUrl;
     link.click();
   };
@@ -649,26 +667,20 @@ export default function DuoPhotobooth() {
   };
 
   return (
-    <main className="min-h-screen bg-[#FAF7F2] text-[#264653] flex flex-col items-center px-4 py-6 md:py-10">
-      <div className="w-full max-w-2xl flex items-center justify-between mb-6">
+    <main className="min-h-screen bg-[#FAF7F2] text-[#264653] flex flex-col items-center px-4 py-5 md:py-10">
+      <div className="w-full max-w-2xl flex items-center justify-between mb-5">
         <Link
           href="/"
-          className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-[#DA6868] transition"
+          className="inline-flex items-center gap-1.5 text-xs md:text-sm font-medium text-slate-600 hover:text-[#DA6868] transition"
         >
           <ArrowLeft className="w-4 h-4" />
-          Kembali ke Beranda
+          Kembali
         </Link>
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 relative shrink-0 rounded-xl overflow-hidden shadow-xs">
-            <Image
-              src="/dekatan2.png"
-              alt="Dekatan"
-              fill
-              className="object-contain"
-              priority
-            />
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 md:w-11 md:h-11 relative shrink-0 rounded-xl overflow-hidden shadow-xs">
+            <Image src="/dekatan2.png" alt="Dekatan" fill className="object-contain" priority />
           </div>
-          <span className="text-xs font-semibold tracking-wider text-[#DA6868] uppercase bg-rose-50 px-3.5 py-1.5 rounded-full border border-rose-100 flex items-center gap-1.5">
+          <span className="text-[11px] md:text-xs font-semibold tracking-wider text-[#DA6868] uppercase bg-rose-50 px-3 py-1 md:py-1.5 rounded-full border border-rose-100 flex items-center gap-1.5">
             <Users className="w-3.5 h-3.5" />
             Mode Berdua (LDR)
           </span>
@@ -676,8 +688,8 @@ export default function DuoPhotobooth() {
       </div>
 
       {!isConnected && !finalStripUrl && (
-        <div className="w-full max-w-md bg-white rounded-3xl p-6 shadow-sm border border-stone-200 mb-6">
-          <h2 className="text-base font-bold text-stone-800 mb-1">Sambungkan ke Pasangan</h2>
+        <div className="w-full max-w-md bg-white rounded-3xl p-5 md:p-6 shadow-sm border border-stone-200 mb-6">
+          <h2 className="text-sm md:text-base font-bold text-stone-800 mb-1">Sambungkan ke Pasangan</h2>
           <p className="text-xs text-stone-500 mb-4">{statusMessage}</p>
 
           <div className="bg-[#FAF7F2] p-3.5 rounded-2xl border border-stone-200 mb-4 flex items-center justify-between">
@@ -692,7 +704,7 @@ export default function DuoPhotobooth() {
             <button
               onClick={handleCopyCode}
               disabled={!peerId}
-              className="px-3 py-2 bg-white rounded-xl border border-stone-200 text-xs font-medium text-stone-600 hover:text-[#DA6868] flex items-center gap-1.5"
+              className="px-3 py-2 bg-white rounded-xl border border-stone-200 text-xs font-medium text-stone-600 hover:text-[#DA6868] active:scale-95 touch-manipulation flex items-center gap-1.5 transition"
             >
               {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5 text-stone-500" />}
               {isCopied ? 'Tersalin' : 'Salin'}
@@ -702,16 +714,16 @@ export default function DuoPhotobooth() {
           <div className="flex gap-2">
             <input
               type="text"
-              placeholder="Masukkan kode pasangan"
+              placeholder="Kode pasangan"
               value={targetPeerId}
               onChange={(e) => setTargetPeerId(e.target.value.toUpperCase())}
               maxLength={6}
-              className="flex-1 px-4 py-2.5 rounded-xl border border-stone-300 text-sm font-mono uppercase tracking-wider focus:outline-none focus:border-[#DA6868]"
+              className="flex-1 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono uppercase tracking-wider focus:outline-none focus:border-[#DA6868]"
             />
             <button
               onClick={handleConnectToPartner}
               disabled={!targetPeerId || targetPeerId.length < 4}
-              className="px-5 py-2.5 bg-[#DA6868] text-white rounded-xl text-sm font-semibold hover:bg-[#c85656] disabled:opacity-50 transition"
+              className="px-5 py-2.5 bg-[#DA6868] text-white rounded-xl text-sm font-semibold hover:bg-[#c85656] disabled:opacity-50 active:scale-95 touch-manipulation transition"
             >
               Gabung
             </button>
@@ -722,7 +734,6 @@ export default function DuoPhotobooth() {
       {!finalStripUrl && (
         <div className="w-full max-w-md flex flex-col items-center">
           <div className="relative w-full aspect-[4/3] bg-stone-900 rounded-3xl overflow-hidden shadow-xl border-4 border-white grid grid-cols-2 divide-x-2 divide-white/40">
-            {/* KAMERA LOKAL (Video di-mute agar tidak berdengung ke telinga sendiri) */}
             <div className="relative w-full h-full bg-stone-800 overflow-hidden">
               <video
                 ref={localVideoRef}
@@ -736,7 +747,6 @@ export default function DuoPhotobooth() {
               </span>
             </div>
 
-            {/* KAMERA PASANGAN (Audio TIDAK di-mute agar suara pasangan terdengar) */}
             <div className="relative w-full h-full bg-stone-800 overflow-hidden flex items-center justify-center">
               <video
                 ref={remoteVideoRef}
@@ -773,8 +783,7 @@ export default function DuoPhotobooth() {
             )}
           </div>
 
-          {/* KONTROL MIKROFON & INDIKATOR */}
-          <div className="w-full flex items-center justify-between my-4 px-2">
+          <div className="w-full flex items-center justify-between my-3.5 px-2">
             <div className="flex gap-2">
               {[0, 1, 2, 3].map((idx) => (
                 <div
@@ -792,7 +801,7 @@ export default function DuoPhotobooth() {
 
             <button
               onClick={toggleMic}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 transition ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 touch-manipulation active:scale-95 transition ${
                 isMicMuted
                   ? 'bg-red-50 text-red-600 border border-red-200'
                   : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
@@ -807,7 +816,7 @@ export default function DuoPhotobooth() {
             <button
               onClick={handleTriggerSession}
               disabled={!isConnected || !cameraReady || isCapturing || isGeneratingStrip}
-              className={`w-full py-4 rounded-2xl font-bold text-white shadow-lg flex items-center justify-center gap-3 transition-all ${
+              className={`w-full py-4 rounded-2xl font-bold text-white shadow-lg flex items-center justify-center gap-3 touch-manipulation transition-all ${
                 !isConnected || !cameraReady || isCapturing || isGeneratingStrip
                   ? 'bg-slate-400 cursor-not-allowed opacity-60'
                   : 'bg-[#DA6868] hover:bg-[#c85656] active:scale-[0.98]'
@@ -831,12 +840,11 @@ export default function DuoPhotobooth() {
 
       {finalStripUrl && (
         <div className="w-full max-w-md flex flex-col items-center animate-fade-in">
-          <div className="flex items-center gap-2 text-stone-600 mb-2 text-sm font-semibold">
+          <div className="flex items-center gap-2 text-stone-600 mb-2.5 text-sm font-semibold">
             <Sparkles className="w-4 h-4 text-[#DA6868]" />
             Strip Foto Berdua Sudah Jadi!
           </div>
 
-          {/* PEMILIH FILTER ESTETIK */}
           <div className="flex items-center gap-1.5 mb-2.5 bg-white px-3 py-1.5 rounded-2xl shadow-xs border border-stone-200">
             <span className="text-xs font-semibold text-stone-500 mr-1.5">Filter:</span>
             {(Object.keys(PHOTO_FILTERS) as PhotoFilterKey[]).map((key) => {
@@ -846,7 +854,7 @@ export default function DuoPhotobooth() {
                 <button
                   key={key}
                   onClick={() => handleFilterChange(key)}
-                  className={`px-3 py-1 rounded-xl text-xs font-medium transition-all ${
+                  className={`px-3 py-1 rounded-xl text-xs font-medium touch-manipulation transition-all ${
                     isSelected
                       ? 'bg-[#DA6868] text-white shadow-xs'
                       : 'text-stone-600 hover:bg-stone-100'
@@ -858,8 +866,7 @@ export default function DuoPhotobooth() {
             })}
           </div>
 
-          {/* PEMILIH WARNA BINGKAI */}
-          <div className="flex items-center gap-3 mb-3 bg-white px-4 py-2.5 rounded-2xl shadow-xs border border-stone-200">
+          <div className="flex items-center gap-3 mb-3 bg-white px-4 py-2 rounded-2xl shadow-xs border border-stone-200">
             <span className="text-xs font-semibold text-stone-500 mr-1">Warna:</span>
             {(Object.keys(FRAME_THEMES) as FrameThemeKey[]).map((key) => {
               const theme = FRAME_THEMES[key];
@@ -868,7 +875,7 @@ export default function DuoPhotobooth() {
                 <button
                   key={key}
                   onClick={() => handleThemeChange(key)}
-                  className={`w-7 h-7 rounded-full transition-all border-2 flex items-center justify-center ${
+                  className={`w-7 h-7 rounded-full transition-all border-2 touch-manipulation flex items-center justify-center ${
                     isSelected ? 'scale-110 ring-2 ring-[#DA6868] ring-offset-2' : 'hover:scale-105 opacity-85'
                   }`}
                   style={{ backgroundColor: theme.bg, borderColor: theme.swatchBorder }}
@@ -878,7 +885,6 @@ export default function DuoPhotobooth() {
             })}
           </div>
 
-          {/* INPUT PESAN PRIBADI DUO (SINKRON 2 ARAH) */}
           <div className="w-full bg-white p-3 rounded-2xl shadow-xs border border-stone-200 mb-4">
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs font-semibold text-stone-600">
@@ -891,7 +897,7 @@ export default function DuoPhotobooth() {
             <input
               type="text"
               maxLength={40}
-              placeholder="Contoh: Nama anda & Pasangan — Jarak Bukan Halangan"
+              placeholder="Contoh: Eko & Pasangan — Jarak Bukan Halangan"
               value={customNote}
               onChange={(e) => handleNoteChange(e.target.value)}
               className="w-full px-3 py-2 text-xs rounded-xl border border-stone-200 focus:outline-none focus:border-[#DA6868] text-stone-700 placeholder:text-stone-400"
@@ -902,7 +908,6 @@ export default function DuoPhotobooth() {
             </div>
           </div>
 
-          {/* PRATINJAU KERTAS STRIP FOTO */}
           <div className="p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 max-w-[280px]">
             {/* eslint-disable-next-html-element/no-img-element */}
             <img src={finalStripUrl} alt="Hasil Photobooth Berdua" className="w-full h-auto rounded-lg shadow-inner" />
@@ -911,15 +916,15 @@ export default function DuoPhotobooth() {
           <div className="w-full flex flex-col gap-3 mt-6">
             <button
               onClick={handleDownload}
-              className="w-full py-3.5 bg-[#DA6868] text-white font-bold rounded-xl shadow-md hover:bg-[#c85656] flex items-center justify-center gap-2 transition"
+              className="w-full py-3.5 bg-[#DA6868] text-white font-bold rounded-xl shadow-md hover:bg-[#c85656] active:scale-95 touch-manipulation flex items-center justify-center gap-2 transition"
             >
               <Download className="w-5 h-5" />
-              Unduh Foto Strip ({FRAME_THEMES[selectedTheme].name})
+              Simpan / Bagikan Foto Strip
             </button>
 
             <button
               onClick={handleRetake}
-              className="w-full py-3.5 bg-white text-slate-700 font-semibold rounded-xl border border-stone-300 hover:bg-stone-50 flex items-center justify-center gap-2 transition"
+              className="w-full py-3.5 bg-white text-slate-700 font-semibold rounded-xl border border-stone-300 hover:bg-stone-50 active:scale-95 touch-manipulation flex items-center justify-center gap-2 transition"
             >
               <RefreshCw className="w-4 h-4" />
               Foto Ulang

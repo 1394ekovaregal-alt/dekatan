@@ -198,7 +198,7 @@ export default function SoloPhotobooth() {
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user' },
+          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } },
           audio: false,
         });
       } catch {
@@ -444,10 +444,30 @@ export default function SoloPhotobooth() {
     }
   };
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (!finalStripUrl) return;
+
+    const fileName = `dekatan-solo-${selectedTheme}-${Date.now()}.png`;
+
+    try {
+      const response = await fetch(finalStripUrl);
+      const blob = await response.blob();
+      const file = new File([blob], fileName, { type: 'image/png' });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: 'Foto Strip Dekatan',
+          text: 'Strip kenangan dari Dekatan Photobooth ✨',
+        });
+        return;
+      }
+    } catch (error) {
+      console.log('Web Share dibatalkan atau tidak didukung:', error);
+    }
+
     const link = document.createElement('a');
-    link.download = `dekatan-solo-${selectedTheme}-${selectedFilter}-${Date.now()}.png`;
+    link.download = fileName;
     link.href = finalStripUrl;
     link.click();
   };
@@ -460,26 +480,20 @@ export default function SoloPhotobooth() {
   };
 
   return (
-    <main className="min-h-screen bg-[#FAF7F2] text-[#264653] flex flex-col items-center px-4 py-6 md:py-10">
-      <div className="w-full max-w-2xl flex items-center justify-between mb-6">
+    <main className="min-h-screen bg-[#FAF7F2] text-[#264653] flex flex-col items-center px-4 py-5 md:py-10">
+      <div className="w-full max-w-2xl flex items-center justify-between mb-5">
         <Link
           href="/"
-          className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-[#DA6868] transition"
+          className="inline-flex items-center gap-1.5 text-xs md:text-sm font-medium text-slate-600 hover:text-[#DA6868] transition"
         >
           <ArrowLeft className="w-4 h-4" />
-          Kembali ke Beranda
+          Kembali
         </Link>
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 relative shrink-0 rounded-xl overflow-hidden shadow-xs">
-            <Image
-              src="/dekatan2.png"
-              alt="Dekatan"
-              fill
-              className="object-contain"
-              priority
-            />
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 md:w-11 md:h-11 relative shrink-0 rounded-xl overflow-hidden shadow-xs">
+            <Image src="/dekatan2.png" alt="Dekatan" fill className="object-contain" priority />
           </div>
-          <span className="text-xs font-semibold tracking-wider text-[#DA6868] uppercase bg-rose-50 px-3.5 py-1.5 rounded-full border border-rose-100">
+          <span className="text-[11px] md:text-xs font-semibold tracking-wider text-[#DA6868] uppercase bg-rose-50 px-3 py-1 md:py-1.5 rounded-full border border-rose-100">
             Mode Sendiri
           </span>
         </div>
@@ -542,25 +556,25 @@ export default function SoloPhotobooth() {
             ))}
           </div>
 
-          <div className="w-full mt-2">
+          <div className="w-full mt-1">
             <button
               onClick={startPhotoSession}
               disabled={!cameraReady || isCapturing || isGeneratingStrip}
-              className={`w-full py-4 rounded-2xl font-bold text-white shadow-lg flex items-center justify-center gap-3 transition-all ${
+              className={`w-full py-4 rounded-2xl font-bold text-white shadow-lg flex items-center justify-center gap-3 touch-manipulation transition-all ${
                 !cameraReady || isCapturing || isGeneratingStrip
                   ? 'bg-slate-400 cursor-not-allowed opacity-60'
-                  : 'bg-[#DA6868] hover:bg-[#c85656] hover:shadow-xl active:scale-[0.98]'
+                  : 'bg-[#DA6868] hover:bg-[#c85656] active:scale-[0.98]'
               }`}
             >
               <Camera className="w-5 h-5" />
               {isCapturing
-                ? `Sedang Mengambil Foto (${currentShot}/4)...`
+                ? `Mengambil Foto (${currentShot}/4)...`
                 : isGeneratingStrip
                 ? 'Menyusun Strip Foto...'
                 : 'Mulai Foto (4 Jepretan)'}
             </button>
-            <p className="text-center text-xs text-slate-500 mt-3">
-              Kamera akan menghitung 3 detik secara otomatis untuk setiap foto.
+            <p className="text-center text-xs text-slate-500 mt-2.5">
+              Kamera menghitung 3 detik otomatis untuk setiap jepretan.
             </p>
           </div>
         </div>
@@ -568,12 +582,11 @@ export default function SoloPhotobooth() {
 
       {finalStripUrl && (
         <div className="w-full max-w-md flex flex-col items-center animate-fade-in">
-          <div className="flex items-center gap-2 text-stone-600 mb-2 text-sm font-semibold">
+          <div className="flex items-center gap-2 text-stone-600 mb-2.5 text-sm font-semibold">
             <Sparkles className="w-4 h-4 text-[#DA6868]" />
             Strip Fotomu Sudah Jadi!
           </div>
 
-          {/* PEMILIH FILTER ESTETIK */}
           <div className="flex items-center gap-1.5 mb-2.5 bg-white px-3 py-1.5 rounded-2xl shadow-xs border border-stone-200">
             <span className="text-xs font-semibold text-stone-500 mr-1.5">Filter:</span>
             {(Object.keys(PHOTO_FILTERS) as PhotoFilterKey[]).map((key) => {
@@ -583,7 +596,7 @@ export default function SoloPhotobooth() {
                 <button
                   key={key}
                   onClick={() => handleFilterChange(key)}
-                  className={`px-3 py-1 rounded-xl text-xs font-medium transition-all ${
+                  className={`px-3 py-1 rounded-xl text-xs font-medium touch-manipulation transition-all ${
                     isSelected
                       ? 'bg-[#DA6868] text-white shadow-xs'
                       : 'text-stone-600 hover:bg-stone-100'
@@ -595,8 +608,7 @@ export default function SoloPhotobooth() {
             })}
           </div>
 
-          {/* PEMILIH WARNA BINGKAI */}
-          <div className="flex items-center gap-3 mb-3 bg-white px-4 py-2.5 rounded-2xl shadow-xs border border-stone-200">
+          <div className="flex items-center gap-3 mb-3 bg-white px-4 py-2 rounded-2xl shadow-xs border border-stone-200">
             <span className="text-xs font-semibold text-stone-500 mr-1">Warna:</span>
             {(Object.keys(FRAME_THEMES) as FrameThemeKey[]).map((key) => {
               const theme = FRAME_THEMES[key];
@@ -605,7 +617,7 @@ export default function SoloPhotobooth() {
                 <button
                   key={key}
                   onClick={() => handleThemeChange(key)}
-                  className={`w-7 h-7 rounded-full transition-all border-2 flex items-center justify-center ${
+                  className={`w-7 h-7 rounded-full transition-all border-2 touch-manipulation flex items-center justify-center ${
                     isSelected
                       ? 'scale-110 ring-2 ring-[#DA6868] ring-offset-2'
                       : 'hover:scale-105 opacity-85'
@@ -617,7 +629,6 @@ export default function SoloPhotobooth() {
             })}
           </div>
 
-          {/* INPUT PESAN PRIBADI */}
           <div className="w-full bg-white p-3 rounded-2xl shadow-xs border border-stone-200 mb-4">
             <label className="block text-xs font-semibold text-stone-600 mb-1.5">
               Pesan Pribadi / Catatan Singkat:
@@ -631,12 +642,11 @@ export default function SoloPhotobooth() {
               className="w-full px-3 py-2 text-xs rounded-xl border border-stone-200 focus:outline-none focus:border-[#DA6868] text-stone-700 placeholder:text-stone-400"
             />
             <div className="flex justify-between items-center mt-1">
-              <span className="text-[10px] text-stone-400">Tercetak langsung di bawah logo strip foto</span>
+              <span className="text-[10px] text-stone-400">Tercetak langsung di bawah foto</span>
               <span className="text-[10px] text-stone-400">{customNote.length}/40</span>
             </div>
           </div>
 
-          {/* PRATINJAU KERTAS STRIP FOTO */}
           <div className="p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 max-w-[280px]">
             {/* eslint-disable-next-html-element/no-img-element */}
             <img
@@ -649,15 +659,15 @@ export default function SoloPhotobooth() {
           <div className="w-full flex flex-col gap-3 mt-6">
             <button
               onClick={handleDownload}
-              className="w-full py-3.5 bg-[#DA6868] text-white font-bold rounded-xl shadow-md hover:bg-[#c85656] flex items-center justify-center gap-2 transition"
+              className="w-full py-3.5 bg-[#DA6868] text-white font-bold rounded-xl shadow-md hover:bg-[#c85656] active:scale-95 touch-manipulation flex items-center justify-center gap-2 transition"
             >
               <Download className="w-5 h-5" />
-              Unduh Foto Strip ({FRAME_THEMES[selectedTheme].name})
+              Simpan / Bagikan Foto Strip
             </button>
 
             <button
               onClick={handleRetake}
-              className="w-full py-3.5 bg-white text-slate-700 font-semibold rounded-xl border border-stone-300 hover:bg-stone-50 flex items-center justify-center gap-2 transition"
+              className="w-full py-3.5 bg-white text-slate-700 font-semibold rounded-xl border border-stone-300 hover:bg-stone-50 active:scale-95 touch-manipulation flex items-center justify-center gap-2 transition"
             >
               <RefreshCw className="w-4 h-4" />
               Foto Ulang
