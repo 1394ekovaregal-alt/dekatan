@@ -35,7 +35,7 @@ export default function Home() {
         </Link>
 
         <p className="text-sm font-medium italic text-[#264653]/70">
-          “Jauh di mata, dekat di frame.”
+          “Solusi Quality time.”
         </p>
 
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#DA6868]/10 border border-[#DA6868]/30 text-[#DA6868] text-xs font-semibold shadow-xs">
@@ -157,7 +157,7 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="w-full max-w-6xl mx-auto px-6 py-6 text-center border-t border-[#264653]/10 text-xs text-[#264653]/60 flex items-center justify-center gap-1.5">
-        <span>Solusi Quality time</span>
+        <span>Developed by EA</span>
         <span>• © 2026 Dekatan</span>
       </footer>
     </div>
