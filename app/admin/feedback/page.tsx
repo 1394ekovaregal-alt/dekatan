@@ -14,6 +14,10 @@ import {
   CheckCircle2,
   AlertCircle,
   MessageSquare,
+  Users,
+  BarChart3,
+  Activity,
+  Sparkles,
 } from 'lucide-react';
 import {
   collection,
@@ -27,8 +31,8 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
-// Sesuaikan dengan nama Cloud Name dan Upload Preset akun Cloudinary milikmu:
-const CLOUDINARY_CLOUD_NAME = 'cx9rcd4t'; // Ganti dengan nama Cloud Name akun Cloudinary-mu
+// Konfigurasi Cloudinary
+const CLOUDINARY_CLOUD_NAME = 'cx9rcd4t';
 const CLOUDINARY_UPLOAD_PRESET = 'dekatan_template';
 
 interface FeedbackItem {
@@ -52,7 +56,7 @@ interface CustomTemplate {
 export default function AdminDashboardPage() {
   const [pin, setPin] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [activeTab, setActiveTab] = useState<'feedback' | 'templates'>('templates');
+  const [activeTab, setActiveTab] = useState<'templates' | 'feedback' | 'analytics'>('templates');
 
   // State Feedback
   const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([]);
@@ -61,6 +65,10 @@ export default function AdminDashboardPage() {
   // State Template
   const [templates, setTemplates] = useState<CustomTemplate[]>([]);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(true);
+
+  // State Pengunjung
+  const [visitorCount, setVisitorCount] = useState<number>(0);
+  const [isLoadingVisitors, setIsLoadingVisitors] = useState(true);
 
   // Form State Upload Template
   const [name, setName] = useState('');
@@ -123,6 +131,26 @@ export default function AdminDashboardPage() {
       (err) => {
         console.error('Firestore templates error:', err);
         setIsLoadingTemplates(false);
+      }
+    );
+    return () => unsubscribe();
+  }, [isAuthenticated]);
+
+  // 3. Dengarkan Statistik Pengunjung Real-time
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    setIsLoadingVisitors(true);
+    const unsubscribe = onSnapshot(
+      doc(db, 'stats', 'visitors'),
+      (docSnap) => {
+        if (docSnap.exists()) {
+          setVisitorCount(docSnap.data()?.total || 0);
+        }
+        setIsLoadingVisitors(false);
+      },
+      (err) => {
+        console.error('Firestore visitors error:', err);
+        setIsLoadingVisitors(false);
       }
     );
     return () => unsubscribe();
@@ -273,8 +301,8 @@ export default function AdminDashboardPage() {
         </span>
       </div>
 
-      {/* Tab Switcher: Kelola Template vs Masukan */}
-      <div className="w-full bg-stone-200/70 p-1.5 rounded-2xl flex gap-2 mb-6">
+      {/* Tab Switcher: 3 Tab Menu */}
+      <div className="w-full bg-stone-200/70 p-1.5 rounded-2xl flex flex-col sm:flex-row gap-2 mb-6">
         <button
           onClick={() => setActiveTab('templates')}
           className={`flex-1 py-2.5 rounded-xl text-xs md:text-sm font-bold flex items-center justify-center gap-2 transition ${
@@ -286,6 +314,7 @@ export default function AdminDashboardPage() {
           <UploadCloud className="w-4 h-4" />
           Upload & Kelola Template ({templates.length})
         </button>
+
         <button
           onClick={() => setActiveTab('feedback')}
           className={`flex-1 py-2.5 rounded-xl text-xs md:text-sm font-bold flex items-center justify-center gap-2 transition ${
@@ -296,6 +325,18 @@ export default function AdminDashboardPage() {
         >
           <MessageSquare className="w-4 h-4" />
           Masukan Pengunjung ({feedbacks.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('analytics')}
+          className={`flex-1 py-2.5 rounded-xl text-xs md:text-sm font-bold flex items-center justify-center gap-2 transition ${
+            activeTab === 'analytics'
+              ? 'bg-white text-[#DA6868] shadow-xs'
+              : 'text-stone-600 hover:text-stone-900'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4" />
+          Statistik Pengunjung ({visitorCount})
         </button>
       </div>
 
@@ -557,6 +598,97 @@ export default function AdminDashboardPage() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ================= TAB 3: STATISTIK PENGUNJUNG ================= */}
+      {activeTab === 'analytics' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Baris Kartu Angka Utama */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Total Kunjungan */}
+            <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">
+                  Total Pengunjung
+                </span>
+                <div className="w-10 h-10 rounded-2xl bg-rose-50 text-[#DA6868] flex items-center justify-center">
+                  <Users className="w-5 h-5" />
+                </div>
+              </div>
+              <div>
+                <h3 className="text-3xl font-extrabold text-[#DA6868]">
+                  {isLoadingVisitors ? (
+                    <span className="text-sm font-normal text-stone-400">Memuat...</span>
+                  ) : (
+                    visitorCount.toLocaleString('id-ID')
+                  )}
+                </h3>
+                <p className="text-[11px] text-stone-500 mt-1">Tautan web dibuka oleh pengunjung</p>
+              </div>
+            </div>
+
+            {/* Target Uji Coba Beta */}
+            <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">
+                  Target Sesi Beta
+                </span>
+                <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+              </div>
+              <div>
+                <h3 className="text-3xl font-extrabold text-stone-800">
+                  50 <span className="text-xs font-semibold text-stone-400">Sesi Awal</span>
+                </h3>
+                <div className="w-full bg-stone-100 h-2 rounded-full overflow-hidden mt-3">
+                  <div
+                    className="bg-amber-500 h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${Math.min(100, Math.round((visitorCount / 50) * 100))}%`,
+                    }}
+                  />
+                </div>
+                <p className="text-[10px] text-stone-400 mt-1.5">
+                  Progres: {Math.min(100, Math.round((visitorCount / 50) * 100))}% dari kuota awal
+                </p>
+              </div>
+            </div>
+
+            {/* Status Sistem */}
+            <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">
+                  Status Server
+                </span>
+                <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <Activity className="w-5 h-5" />
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <h3 className="text-lg font-bold text-emerald-700">Online & Stabil</h3>
+                </div>
+                <p className="text-[11px] text-stone-500 mt-1">Firebase Firestore & Cloudinary Aktif</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Kotak Informasi Tambahan */}
+          <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm">
+            <h4 className="text-sm font-bold text-stone-800 mb-2 flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-[#DA6868]" />
+              Tentang Pencatatan Pengunjung
+            </h4>
+            <p className="text-xs text-stone-500 leading-relaxed mb-3">
+              Setiap kali seseorang membuka halaman utama web Dekatan di perangkat HP atau laptop, sistem akan menambahkan 1 hitungan ke Firestore (<code className="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700">stats/visitors</code>).
+            </p>
+            <div className="p-3 bg-stone-50 rounded-2xl border border-stone-200 text-[11px] text-stone-600">
+              💡 <strong>Catatan:</strong> Refresh berulang kali dalam satu sesi browser tidak akan menambah hitungan ganda karena sistem menggunakan validasi sesi di peramban.
+            </div>
+          </div>
         </div>
       )}
     </main>
