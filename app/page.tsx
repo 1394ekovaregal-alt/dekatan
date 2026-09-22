@@ -1,8 +1,23 @@
-import Link from "next/link";
+'use client';
+
+import { useEffect } from 'react';
+import Link from 'next/link';
 import Image from 'next/image';
-import { Camera, Gamepad2, Tv, Sparkles, Heart } from "lucide-react";
+import { Camera, Gamepad2, Tv, Sparkles } from 'lucide-react';
+import { doc, setDoc, increment } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 export default function Home() {
+  useEffect(() => {
+    // Gunakan sessionStorage agar refresh halaman tidak dihitung berulang kali
+    const hasVisited = sessionStorage.getItem('visited_dekatan');
+    if (!hasVisited) {
+      setDoc(doc(db, 'stats', 'visitors'), { total: increment(1) }, { merge: true })
+        .then(() => sessionStorage.setItem('visited_dekatan', 'true'))
+        .catch((err) => console.error('Gagal mencatat kunjungan:', err));
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#FAF7F2] flex flex-col justify-between">
       {/* Header Navigasi */}
