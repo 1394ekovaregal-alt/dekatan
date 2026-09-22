@@ -48,10 +48,10 @@ export default function Home() {
       <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-12 flex flex-col justify-center">
         <div className="text-center max-w-2xl mx-auto mb-12">
           <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[#264653] mb-4">
-            Abadikan Rindu, Ciptakan Kenangan Bersama
+            Ciptakan Kenangan Bersama
           </h1>
           <p className="text-base sm:text-lg text-[#264653]/80 leading-relaxed">
-            Ruang virtual interaktif dan photobooth khusus pasangan jarak jauh untuk melepas rindu dengan cara paling berkesan. Pilih aktivitas favorit kalian di bawah untuk memulai momen spesial hari ini.
+            Ruang virtual interaktif dan photobooth
           </p>
         </div>
 
