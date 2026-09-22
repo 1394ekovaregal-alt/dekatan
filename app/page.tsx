@@ -25,7 +25,7 @@ export default function Home() {
 
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#DA6868]/10 border border-[#DA6868]/30 text-[#DA6868] text-xs font-semibold shadow-xs">
           <Sparkles className="w-3.5 h-3.5" />
-          <span>🔥 Uji Coba Terbatas: 50 Pasangan Pertama</span>
+          <span>🔥 Uji Coba Terbatas</span>
         </div>
       </header>
 

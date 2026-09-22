@@ -422,14 +422,14 @@ export default function SoloPhotobooth() {
       const darkColors = ['#18181B', '#232931', '#450A0A', '#0F172A', '#DA6868'];
       const isDarkTheme = (template as any)?.isDark || darkColors.includes(template.bg);
 
-      const logoImg = new (window as any).Image();
-      logoImg.src = '/dekatan1.png';
+     const logoImg = new (window as any).Image();
+      logoImg.src = isDarkTheme ? '/dekatan-white.png' : '/dekatan1.png';
       await new Promise((resolve) => {
         logoImg.onload = resolve;
         logoImg.onerror = resolve;
       });
 
-      const logoWidth = 180;
+const logoWidth = 180;
       const logoHeight = logoImg.naturalHeight
         ? (logoImg.naturalHeight / logoImg.naturalWidth) * logoWidth
         : 50;
@@ -437,12 +437,7 @@ export default function SoloPhotobooth() {
       const logoY = footerStartY + 25;
 
       if (logoImg.complete && logoImg.naturalWidth !== 0) {
-        ctx.save();
-        if (isDarkTheme) {
-          ctx.filter = 'brightness(0) invert(1)';
-        }
         ctx.drawImage(logoImg, logoX, logoY, logoWidth, logoHeight);
-        ctx.restore();
       }
 
       // 7. Tanggal dan Teks Footer
