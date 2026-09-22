@@ -157,7 +157,7 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="w-full max-w-6xl mx-auto px-6 py-6 text-center border-t border-[#264653]/10 text-xs text-[#264653]/60 flex items-center justify-center gap-1.5">
-        <span>Solusi Quality time untuk pejuang LDR</span>
+        <span>Solusi Quality time</span>
         <span>• © 2026 Dekatan</span>
       </footer>
     </div>
