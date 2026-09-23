@@ -17,6 +17,12 @@ import {
   Palette,
   Play,
   SlidersHorizontal,
+  Maximize2,
+  ZoomIn,
+  ZoomOut,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
 } from 'lucide-react';
 import type { DataConnection, MediaConnection } from 'peerjs';
 import TemplateSelectorModal, {
@@ -33,6 +39,7 @@ const PHOTO_FILTERS = {
 } as const;
 
 type PhotoFilterKey = keyof typeof PHOTO_FILTERS;
+type TextAlign = 'left' | 'center' | 'right';
 
 const NOTE_FONTS = [
   { id: 'sans', name: 'Modern', family: 'sans-serif' },
@@ -95,7 +102,6 @@ const detectPhotoSlots = (
 
     if (verticalSegments.length < 3) return [];
 
-    // Margin bleed 8px di balik bingkai agar foto terselip rapi tanpa celah putih
     const bleed = 8;
     return verticalSegments.map((seg) => {
       const midY = Math.round((seg.startY + seg.endY) / 2);
@@ -130,6 +136,7 @@ export default function DuoPhotobooth() {
   const connRef = useRef<DataConnection | null>(null);
   const callRef = useRef<MediaConnection | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const previewContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Koneksi
   const [peerId, setPeerId] = useState<string>('');
@@ -153,13 +160,31 @@ export default function DuoPhotobooth() {
   const [selectedFilter, setSelectedFilter] = useState<PhotoFilterKey>('normal');
   const selectedFilterRef = useRef<PhotoFilterKey>('normal');
 
-  // Catatan, Font, & Warna
+  // Catatan, Font, Warna, Susunan, & Posisi Jari (Sinkron Dua Arah)
   const [customNote, setCustomNote] = useState<string>('');
   const customNoteRef = useRef<string>('');
   const [noteFont, setNoteFont] = useState<string>('sans-serif');
   const noteFontRef = useRef<string>('sans-serif');
   const [noteColor, setNoteColor] = useState<string>('#DA6868');
   const noteColorRef = useRef<string>('#DA6868');
+  const [noteAlign, setNoteAlign] = useState<TextAlign>('center');
+  const noteAlignRef = useRef<TextAlign>('center');
+  const [notePos, setNotePos] = useState<{ x: number; y: number; scale: number }>({
+    x: 50,
+    y: 86,
+    scale: 1.0,
+  });
+  const notePosRef = useRef<{ x: number; y: number; scale: number }>({
+    x: 50,
+    y: 86,
+    scale: 1.0,
+  });
+  const [isDraggingNote, setIsDraggingNote] = useState(false);
+  const [noteResizeState, setNoteResizeState] = useState<{
+    startX: number;
+    startY: number;
+    initialScale: number;
+  } | null>(null);
 
   // Status Jepret
   const [isCapturing, setIsCapturing] = useState(false);
@@ -198,6 +223,14 @@ export default function DuoPhotobooth() {
   useEffect(() => {
     noteColorRef.current = noteColor;
   }, [noteColor]);
+
+  useEffect(() => {
+    noteAlignRef.current = noteAlign;
+  }, [noteAlign]);
+
+  useEffect(() => {
+    notePosRef.current = notePos;
+  }, [notePos]);
 
   const initAudio = useCallback(() => {
     if (!audioCtxRef.current) {
@@ -346,7 +379,9 @@ export default function DuoPhotobooth() {
       note: string = customNoteRef.current,
       layout: LayoutMode = selectedLayoutRef.current,
       currentFont: string = noteFontRef.current,
-      currentColor: string = noteColorRef.current
+      currentColor: string = noteColorRef.current,
+      currentAlign: TextAlign = noteAlignRef.current,
+      currentPos: { x: number; y: number; scale: number } = notePosRef.current
     ) => {
       setIsGeneratingStrip(true);
       const canvas = document.createElement('canvas');
@@ -456,7 +491,7 @@ export default function DuoPhotobooth() {
         // Tempelkan Overlay Bingkai PNG di atas foto
         ctx.drawImage(overlayImg, 0, 0, W, H);
 
-        // ================= WATERMARK RESMI DEKATAN =================
+        // Watermark Resmi Dekatan (Logo & Tanggal)
         const darkColors = ['#18181B', '#232931', '#450A0A', '#0F172A', '#DA6868'];
         const isDarkTheme = (template as any)?.isDark || darkColors.includes(template.bg);
 
@@ -498,11 +533,16 @@ export default function DuoPhotobooth() {
         ctx.fillText(`${formattedDate} • ${formattedTime} WITA`, W / 2, dateTextY);
 
         if (note.trim()) {
-          const fontSize = isStory916 ? 22 : 15;
-          ctx.font = `600 ${fontSize}px ${currentFont}`;
+          const pixelX = (currentPos.x / 100) * W;
+          const pixelY = (currentPos.y / 100) * H;
+          const baseSize = isStory916 ? 24 : 16;
+          const dynamicSize = Math.round(baseSize * currentPos.scale);
+
+          ctx.font = `600 ${dynamicSize}px ${currentFont}`;
           ctx.fillStyle = currentColor;
-          ctx.textAlign = 'center';
-          ctx.fillText(`“${note.trim()}”`, W / 2, logoY - (isStory916 ? 22 : 15));
+          ctx.textAlign = currentAlign;
+          ctx.textBaseline = 'middle';
+          ctx.fillText(`“${note.trim()}”`, pixelX, pixelY);
         }
       } else {
         // ================= 2. TEMPLATE STANDAR FREMIO (BAWAAN) =================
@@ -510,7 +550,7 @@ export default function DuoPhotobooth() {
         const isStrip3 = layout === 'strip3';
         const padding = 32;
         const spacing = 18;
-        const footerHeight = note.trim() ? 235 : 195;
+        const footerHeight = 195;
 
         let stripWidth = 560;
         let photoWidth = 0;
@@ -684,16 +724,7 @@ export default function DuoPhotobooth() {
           })
           .replace(':', '.');
 
-        let currentTextY = logoY + logoHeight + 24;
-
-        if (note.trim()) {
-          ctx.font = `600 15px ${currentFont}`;
-          ctx.fillStyle = currentColor;
-          ctx.textAlign = 'center';
-          ctx.fillText(`“${note.trim()}”`, stripWidth / 2, currentTextY);
-          currentTextY += 24;
-        }
-
+        const currentTextY = logoY + logoHeight + 24;
         ctx.font = '500 13px sans-serif';
         ctx.fillStyle = template.subTextColor;
         ctx.textAlign = 'center';
@@ -702,6 +733,18 @@ export default function DuoPhotobooth() {
         ctx.font = '700 12px sans-serif';
         ctx.fillStyle = template.textColor;
         ctx.fillText(template.labelFooter || 'DEKATAN DUO', stripWidth / 2, currentTextY + 20);
+
+        if (note.trim()) {
+          const pixelX = (currentPos.x / 100) * stripWidth;
+          const pixelY = (currentPos.y / 100) * totalHeight;
+          const dynamicSize = Math.round(16 * currentPos.scale);
+
+          ctx.font = `600 ${dynamicSize}px ${currentFont}`;
+          ctx.fillStyle = currentColor;
+          ctx.textAlign = currentAlign;
+          ctx.textBaseline = 'middle';
+          ctx.fillText(`“${note.trim()}”`, pixelX, pixelY);
+        }
       }
 
       const dataUrl = canvas.toDataURL('image/png');
@@ -813,7 +856,9 @@ export default function DuoPhotobooth() {
       customNoteRef.current,
       selectedLayoutRef.current,
       noteFontRef.current,
-      noteColorRef.current
+      noteColorRef.current,
+      noteAlignRef.current,
+      notePosRef.current
     );
   }, [initAudio, playBeepSound, playShutterSound, generateDuoStrip]);
 
@@ -841,7 +886,9 @@ export default function DuoPhotobooth() {
               customNoteRef.current,
               data.layout,
               noteFontRef.current,
-              noteColorRef.current
+              noteColorRef.current,
+              noteAlignRef.current,
+              notePosRef.current
             );
           }
         } else if (data?.type === 'TEMPLATE_CHANGE' && data?.template) {
@@ -855,7 +902,9 @@ export default function DuoPhotobooth() {
               customNoteRef.current,
               selectedLayoutRef.current,
               noteFontRef.current,
-              noteColorRef.current
+              noteColorRef.current,
+              noteAlignRef.current,
+              notePosRef.current
             );
           }
         } else if (data?.type === 'FILTER_CHANGE' && data?.filter) {
@@ -869,7 +918,9 @@ export default function DuoPhotobooth() {
               customNoteRef.current,
               selectedLayoutRef.current,
               noteFontRef.current,
-              noteColorRef.current
+              noteColorRef.current,
+              noteAlignRef.current,
+              notePosRef.current
             );
           }
         } else if (data?.type === 'NOTE_CHANGE' && typeof data?.note === 'string') {
@@ -883,7 +934,9 @@ export default function DuoPhotobooth() {
               data.note,
               selectedLayoutRef.current,
               noteFontRef.current,
-              noteColorRef.current
+              noteColorRef.current,
+              noteAlignRef.current,
+              notePosRef.current
             );
           }
         } else if (data?.type === 'FONT_CHANGE' && typeof data?.font === 'string') {
@@ -897,7 +950,9 @@ export default function DuoPhotobooth() {
               customNoteRef.current,
               selectedLayoutRef.current,
               data.font,
-              noteColorRef.current
+              noteColorRef.current,
+              noteAlignRef.current,
+              notePosRef.current
             );
           }
         } else if (data?.type === 'COLOR_CHANGE' && typeof data?.color === 'string') {
@@ -911,7 +966,41 @@ export default function DuoPhotobooth() {
               customNoteRef.current,
               selectedLayoutRef.current,
               noteFontRef.current,
-              data.color
+              data.color,
+              noteAlignRef.current,
+              notePosRef.current
+            );
+          }
+        } else if (data?.type === 'ALIGN_CHANGE' && data?.align) {
+          setNoteAlign(data.align);
+          noteAlignRef.current = data.align;
+          if (capturedPhotosRef.current.length > 0) {
+            generateDuoStrip(
+              capturedPhotosRef.current,
+              selectedTemplateRef.current,
+              selectedFilterRef.current,
+              customNoteRef.current,
+              selectedLayoutRef.current,
+              noteFontRef.current,
+              noteColorRef.current,
+              data.align,
+              notePosRef.current
+            );
+          }
+        } else if (data?.type === 'POS_CHANGE' && data?.pos) {
+          setNotePos(data.pos);
+          notePosRef.current = data.pos;
+          if (capturedPhotosRef.current.length > 0) {
+            generateDuoStrip(
+              capturedPhotosRef.current,
+              selectedTemplateRef.current,
+              selectedFilterRef.current,
+              customNoteRef.current,
+              selectedLayoutRef.current,
+              noteFontRef.current,
+              noteColorRef.current,
+              noteAlignRef.current,
+              data.pos
             );
           }
         }
@@ -1022,7 +1111,9 @@ export default function DuoPhotobooth() {
         customNote,
         newLayout,
         noteFont,
-        noteColor
+        noteColor,
+        noteAlign,
+        notePos
       );
     }
     if (connRef.current) {
@@ -1041,7 +1132,9 @@ export default function DuoPhotobooth() {
         customNote,
         selectedLayout,
         noteFont,
-        noteColor
+        noteColor,
+        noteAlign,
+        notePos
       );
     }
     if (connRef.current) {
@@ -1068,7 +1161,9 @@ export default function DuoPhotobooth() {
         customNote,
         selectedLayout,
         noteFont,
-        noteColor
+        noteColor,
+        noteAlign,
+        notePos
       );
     }
     if (connRef.current) {
@@ -1087,7 +1182,9 @@ export default function DuoPhotobooth() {
         text,
         selectedLayout,
         noteFont,
-        noteColor
+        noteColor,
+        noteAlign,
+        notePos
       );
     }
     if (connRef.current) {
@@ -1106,7 +1203,9 @@ export default function DuoPhotobooth() {
         customNote,
         selectedLayout,
         fontFamily,
-        noteColor
+        noteColor,
+        noteAlign,
+        notePos
       );
     }
     if (connRef.current) {
@@ -1125,12 +1224,104 @@ export default function DuoPhotobooth() {
         customNote,
         selectedLayout,
         noteFont,
-        colorValue
+        colorValue,
+        noteAlign,
+        notePos
       );
     }
     if (connRef.current) {
       connRef.current.send({ type: 'COLOR_CHANGE', color: colorValue });
     }
+  };
+
+  const handleAlignChange = (align: TextAlign) => {
+    setNoteAlign(align);
+    noteAlignRef.current = align;
+    if (capturedPhotos.length > 0) {
+      generateDuoStrip(
+        capturedPhotos,
+        selectedTemplate,
+        selectedFilter,
+        customNote,
+        selectedLayout,
+        noteFont,
+        noteColor,
+        align,
+        notePos
+      );
+    }
+    if (connRef.current) {
+      connRef.current.send({ type: 'ALIGN_CHANGE', align });
+    }
+  };
+
+  const syncNotePosition = (pos: { x: number; y: number; scale: number }) => {
+    setNotePos(pos);
+    notePosRef.current = pos;
+    if (connRef.current) {
+      connRef.current.send({ type: 'POS_CHANGE', pos });
+    }
+  };
+
+  const handleNotePointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    setIsDraggingNote(true);
+  };
+
+  const handleNotePointerMove = (e: React.PointerEvent) => {
+    if (!isDraggingNote || !previewContainerRef.current) return;
+    e.stopPropagation();
+    const rect = previewContainerRef.current.getBoundingClientRect();
+    const touchX = e.clientX - rect.left;
+    const touchY = e.clientY - rect.top;
+    const pctX = Math.max(5, Math.min(95, (touchX / rect.width) * 100));
+    const pctY = Math.max(5, Math.min(95, (touchY / rect.height) * 100));
+    syncNotePosition({ ...notePosRef.current, x: pctX, y: pctY });
+  };
+
+  const handleNotePointerUp = (e: React.PointerEvent) => {
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch (_) {}
+    setIsDraggingNote(false);
+  };
+
+  const handleNoteResizeDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    setNoteResizeState({
+      startX: e.clientX,
+      startY: e.clientY,
+      initialScale: notePos.scale,
+    });
+  };
+
+  const handleNoteResizeMove = (e: React.PointerEvent) => {
+    if (!noteResizeState) return;
+    e.stopPropagation();
+    const delta = e.clientX - noteResizeState.startX + (e.clientY - noteResizeState.startY);
+    const newScale = Math.max(
+      0.6,
+      Math.min(2.5, Number((noteResizeState.initialScale + delta * 0.012).toFixed(2)))
+    );
+    syncNotePosition({ ...notePosRef.current, scale: newScale });
+  };
+
+  const handleNoteResizeUp = (e: React.PointerEvent) => {
+    if (!noteResizeState) return;
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch (_) {}
+    setNoteResizeState(null);
+  };
+
+  const adjustNoteScale = (step: number) => {
+    const newScale = Math.max(
+      0.6,
+      Math.min(2.5, Number((notePosRef.current.scale + step).toFixed(2)))
+    );
+    syncNotePosition({ ...notePosRef.current, scale: newScale });
   };
 
   const handleDownload = async () => {
@@ -1406,7 +1597,7 @@ export default function DuoPhotobooth() {
             })}
           </div>
 
-          {/* Catatan Singkat dengan Pilihan Font & Warna */}
+          {/* Kotak Pengaturan Catatan Interaktif Berdua */}
           <div className="w-full bg-white p-3.5 rounded-2xl shadow-xs border border-stone-200 mb-3">
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs font-semibold text-stone-600">
@@ -1424,6 +1615,70 @@ export default function DuoPhotobooth() {
               onChange={(e) => handleNoteChange(e.target.value)}
               className="w-full px-3 py-2 text-xs rounded-xl border border-stone-200 focus:outline-none focus:border-[#DA6868] text-stone-700 placeholder:text-stone-400 mb-2.5"
             />
+
+            {/* Pilihan Susunan Teks (Left, Center, Right) */}
+            <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-stone-100">
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] font-medium text-stone-400 mr-1">Susunan:</span>
+                <button
+                  type="button"
+                  onClick={() => handleAlignChange('left')}
+                  className={`p-1.5 rounded-lg border transition ${
+                    noteAlign === 'left'
+                      ? 'bg-rose-50 text-[#DA6868] border-rose-200'
+                      : 'bg-stone-50 text-stone-500 border-stone-100'
+                  }`}
+                  title="Rata Kiri"
+                >
+                  <AlignLeft className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAlignChange('center')}
+                  className={`p-1.5 rounded-lg border transition ${
+                    noteAlign === 'center'
+                      ? 'bg-rose-50 text-[#DA6868] border-rose-200'
+                      : 'bg-stone-50 text-stone-500 border-stone-100'
+                  }`}
+                  title="Rata Tengah"
+                >
+                  <AlignCenter className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAlignChange('right')}
+                  className={`p-1.5 rounded-lg border transition ${
+                    noteAlign === 'right'
+                      ? 'bg-rose-50 text-[#DA6868] border-rose-200'
+                      : 'bg-stone-50 text-stone-500 border-stone-100'
+                  }`}
+                  title="Rata Kanan"
+                >
+                  <AlignRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Ukuran Teks */}
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] font-medium text-stone-400 mr-1">
+                  Ukuran: {Math.round(notePos.scale * 100)}%
+                </span>
+                <button
+                  type="button"
+                  onClick={() => adjustNoteScale(-0.15)}
+                  className="p-1.5 bg-stone-50 text-stone-700 rounded-lg border border-stone-150 hover:bg-stone-100 transition active:scale-95"
+                >
+                  <ZoomOut className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => adjustNoteScale(0.15)}
+                  className="p-1.5 bg-stone-50 text-stone-700 rounded-lg border border-stone-150 hover:bg-stone-100 transition active:scale-95"
+                >
+                  <ZoomIn className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
 
             {/* Pilihan Font */}
             <div className="flex items-center gap-1.5 mb-2.5 overflow-x-auto pb-1">
@@ -1463,9 +1718,10 @@ export default function DuoPhotobooth() {
             </div>
           </div>
 
-          {/* Gambar Akhir */}
+          {/* Gambar Akhir dengan Wadah Interaktif */}
           <div
-            className={`p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 ${
+            ref={previewContainerRef}
+            className={`relative select-none p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 touch-pan-y ${
               selectedLayout === 'grid'
                 ? 'max-w-[320px]'
                 : selectedLayout === 'strip3'
@@ -1475,6 +1731,40 @@ export default function DuoPhotobooth() {
           >
             {/* eslint-disable-next-html-element/no-img-element */}
             <img src={finalStripUrl} alt="Hasil Foto Berdua" className="w-full h-auto rounded-lg shadow-inner" />
+
+            {/* Catatan Singkat Bebas Geser Dua Arah */}
+            {customNote.trim() && (
+              <div
+                onPointerDown={handleNotePointerDown}
+                onPointerMove={handleNotePointerMove}
+                onPointerUp={handleNotePointerUp}
+                onPointerCancel={handleNotePointerUp}
+                style={{
+                  left: `${notePos.x}%`,
+                  top: `${notePos.y}%`,
+                  transform: `translate(-50%, -50%) scale(${notePos.scale})`,
+                  color: noteColor,
+                  fontFamily: noteFont,
+                  textAlign: noteAlign,
+                }}
+                className={`absolute select-none touch-none cursor-grab active:cursor-grabbing p-1.5 rounded-xl border-2 border-dashed border-[#DA6868]/70 bg-white/40 backdrop-blur-[1px] whitespace-nowrap z-28 transition-shadow ${
+                  isDraggingNote ? 'shadow-xl scale-105' : 'shadow-xs'
+                }`}
+              >
+                <span className="font-semibold text-xs leading-none">“{customNote}”</span>
+
+                {/* Tuas Geser Skala */}
+                <div
+                  onPointerDown={handleNoteResizeDown}
+                  onPointerMove={handleNoteResizeMove}
+                  onPointerUp={handleNoteResizeUp}
+                  onPointerCancel={handleNoteResizeUp}
+                  className="absolute -bottom-2 -right-2 w-4 h-4 bg-[#DA6868] text-white rounded-full flex items-center justify-center cursor-se-resize shadow-md active:scale-125 touch-none"
+                >
+                  <Maximize2 className="w-2.5 h-2.5" />
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="w-full flex flex-col gap-3 mt-5">
