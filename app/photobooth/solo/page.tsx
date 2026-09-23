@@ -38,6 +38,21 @@ const AVAILABLE_STICKERS = [
   '☁️', '🔥', '😎', '🍀', '🌼', '🎂',
 ];
 
+const NOTE_FONTS = [
+  { id: 'sans', name: 'Modern', family: 'sans-serif' },
+  { id: 'serif', name: 'Elegan', family: 'Georgia, serif' },
+  { id: 'hand', name: 'Aesthetic', family: 'cursive' },
+  { id: 'mono', name: 'Retro Tik', family: 'Courier New, monospace' },
+] as const;
+
+const NOTE_COLORS = [
+  { id: 'coral', name: 'Coral', value: '#DA6868' },
+  { id: 'dark', name: 'Hitam', value: '#1E293B' },
+  { id: 'white', name: 'Putih', value: '#FFFFFF' },
+  { id: 'brown', name: 'Earthy', value: '#8B5E3C' },
+  { id: 'lavender', name: 'Lilac', value: '#8B5CF6' },
+] as const;
+
 interface PlacedSticker {
   id: string;
   emoji: string;
@@ -139,7 +154,11 @@ export default function SoloPhotobooth() {
   const [selectedTemplate, setSelectedTemplate] = useState<FrameTemplate>(FRAME_TEMPLATES[0]);
   const [selectedLayout, setSelectedLayout] = useState<LayoutMode>('strip4');
   const [selectedFilter, setSelectedFilter] = useState<PhotoFilterKey>('normal');
+
+  // Catatan, Font, & Warna
   const [customNote, setCustomNote] = useState<string>('');
+  const [noteFont, setNoteFont] = useState<string>('sans-serif');
+  const [noteColor, setNoteColor] = useState<string>('#DA6868');
 
   // Stiker
   const [activeTab, setActiveTab] = useState<'filter' | 'stiker'>('filter');
@@ -323,7 +342,9 @@ export default function SoloPhotobooth() {
       filterKey: PhotoFilterKey = selectedFilter,
       note: string = customNote,
       layout: LayoutMode = selectedLayout,
-      stickersToDraw: PlacedSticker[] = placedStickers
+      stickersToDraw: PlacedSticker[] = placedStickers,
+      currentFont: string = noteFont,
+      currentColor: string = noteColor
     ) => {
       setIsGeneratingStrip(true);
       const canvas = document.createElement('canvas');
@@ -433,11 +454,10 @@ export default function SoloPhotobooth() {
         // Tempelkan Overlay Bingkai PNG di atas foto
         ctx.drawImage(overlayImg, 0, 0, W, H);
 
-// ================= WATERMARK RESMI DEKATAN =================
+        // ================= WATERMARK RESMI DEKATAN =================
         const darkColors = ['#18181B', '#232931', '#450A0A', '#0F172A', '#DA6868'];
         const isDarkTheme = (template as any)?.isDark || darkColors.includes(template.bg);
 
-        // 1. Logo Dekatan
         const logoImg = document.createElement('img');
         logoImg.src = isDarkTheme ? '/dekatan-white.png' : '/dekatan1.png';
         await new Promise((resolve) => {
@@ -450,14 +470,12 @@ export default function SoloPhotobooth() {
           ? (logoImg.naturalHeight / logoImg.naturalWidth) * logoW
           : 36;
         const logoX = (W - logoW) / 2;
-        // Posisi logo diangkat sedikit agar pas dengan teks tanggal di bawahnya
         const logoY = H - logoH - (isStory916 ? 60 : 42);
 
         if (logoImg.complete && logoImg.naturalWidth !== 0) {
           ctx.drawImage(logoImg, logoX, logoY, logoW, logoH);
         }
 
-        // 2. Format Tanggal & Jam (Contoh: 16 September 2026 • 11.35 WITA)
         const now = new Date();
         const formattedDate = now.toLocaleDateString('id-ID', {
           day: 'numeric',
@@ -477,21 +495,16 @@ export default function SoloPhotobooth() {
         ctx.textAlign = 'center';
         ctx.fillText(`${formattedDate} • ${formattedTime} WITA`, W / 2, dateTextY);
 
-        // 3. Catatan Kustom Pengguna (Jika Ada)
+        // Catatan Kustom Pengguna
         if (note.trim()) {
-          ctx.font = isStory916 ? '600 20px sans-serif' : '600 14px sans-serif';
-          ctx.fillStyle = isDarkTheme ? '#FFFFFF' : '#DA6868';
+          const fontSize = isStory916 ? 22 : 15;
+          ctx.font = `600 ${fontSize}px ${currentFont}`;
+          ctx.fillStyle = currentColor;
           ctx.textAlign = 'center';
-          ctx.fillText(`“${note.trim()}”`, W / 2, logoY - (isStory916 ? 20 : 14));
+          ctx.fillText(`“${note.trim()}”`, W / 2, logoY - (isStory916 ? 22 : 15));
         }
 
-        if (note.trim()) {
-          ctx.font = '600 18px sans-serif';
-          ctx.fillStyle = isDarkTheme ? '#FFFFFF' : '#DA6868';
-          ctx.textAlign = 'center';
-          ctx.fillText(`“${note.trim()}”`, W / 2, logoY - 14);
-        }
-
+        // Stiker Digital
         if (stickersToDraw && stickersToDraw.length > 0) {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -676,16 +689,18 @@ export default function SoloPhotobooth() {
           month: 'long',
           year: 'numeric',
         });
-        const formattedTime = now.toLocaleTimeString('id-ID', {
-          hour: '2-digit',
-          minute: '2-digit',
-        });
+        const formattedTime = now
+          .toLocaleTimeString('id-ID', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+          .replace(':', '.');
 
         let currentTextY = logoY + logoHeight + 24;
 
         if (note.trim()) {
-          ctx.font = '600 15px sans-serif';
-          ctx.fillStyle = '#DA6868';
+          ctx.font = `600 15px ${currentFont}`;
+          ctx.fillStyle = currentColor;
           ctx.textAlign = 'center';
           ctx.fillText(`“${note.trim()}”`, stripWidth / 2, currentTextY);
           currentTextY += 24;
@@ -718,7 +733,7 @@ export default function SoloPhotobooth() {
       setIsGeneratingStrip(false);
       stopCamera();
     },
-    [selectedTemplate, selectedFilter, customNote, selectedLayout, placedStickers, stopCamera]
+    [selectedTemplate, selectedFilter, customNote, selectedLayout, placedStickers, noteFont, noteColor, stopCamera]
   );
 
   const startPhotoSession = async () => {
@@ -756,20 +771,79 @@ export default function SoloPhotobooth() {
     }
 
     setIsCapturing(false);
-    generatePhotoStrip(tempPhotos, selectedTemplate, selectedFilter, customNote, selectedLayout, []);
+    generatePhotoStrip(
+      tempPhotos,
+      selectedTemplate,
+      selectedFilter,
+      customNote,
+      selectedLayout,
+      [],
+      noteFont,
+      noteColor
+    );
   };
 
   const handleFilterChange = (newFilter: PhotoFilterKey) => {
     setSelectedFilter(newFilter);
     if (capturedPhotos.length > 0) {
-      generatePhotoStrip(capturedPhotos, selectedTemplate, newFilter, customNote, selectedLayout, placedStickers);
+      generatePhotoStrip(
+        capturedPhotos,
+        selectedTemplate,
+        newFilter,
+        customNote,
+        selectedLayout,
+        placedStickers,
+        noteFont,
+        noteColor
+      );
     }
   };
 
   const handleNoteChange = (text: string) => {
     setCustomNote(text);
     if (capturedPhotos.length > 0) {
-      generatePhotoStrip(capturedPhotos, selectedTemplate, selectedFilter, text, selectedLayout, placedStickers);
+      generatePhotoStrip(
+        capturedPhotos,
+        selectedTemplate,
+        selectedFilter,
+        text,
+        selectedLayout,
+        placedStickers,
+        noteFont,
+        noteColor
+      );
+    }
+  };
+
+  const handleFontChange = (fontFamily: string) => {
+    setNoteFont(fontFamily);
+    if (capturedPhotos.length > 0) {
+      generatePhotoStrip(
+        capturedPhotos,
+        selectedTemplate,
+        selectedFilter,
+        customNote,
+        selectedLayout,
+        placedStickers,
+        fontFamily,
+        noteColor
+      );
+    }
+  };
+
+  const handleColorChange = (colorValue: string) => {
+    setNoteColor(colorValue);
+    if (capturedPhotos.length > 0) {
+      generatePhotoStrip(
+        capturedPhotos,
+        selectedTemplate,
+        selectedFilter,
+        customNote,
+        selectedLayout,
+        placedStickers,
+        noteFont,
+        colorValue
+      );
     }
   };
 
@@ -876,7 +950,9 @@ export default function SoloPhotobooth() {
       selectedFilter,
       customNote,
       selectedLayout,
-      placedStickers
+      placedStickers,
+      noteFont,
+      noteColor
     );
 
     const fileName = `dekatan-solo-${selectedTemplate.id}-${Date.now()}.png`;
@@ -1149,8 +1225,8 @@ export default function SoloPhotobooth() {
             </div>
           )}
 
-          {/* Input Catatan */}
-          <div className="w-full bg-white p-3 rounded-2xl shadow-xs border border-stone-200 mb-3">
+          {/* Input Catatan dengan Pilihan Font & Warna */}
+          <div className="w-full bg-white p-3.5 rounded-2xl shadow-xs border border-stone-200 mb-3">
             <label className="block text-xs font-semibold text-stone-600 mb-1.5">
               Pesan Pribadi / Catatan Singkat:
             </label>
@@ -1160,8 +1236,45 @@ export default function SoloPhotobooth() {
               placeholder="Contoh: Me Time, Liburan Sendiri..."
               value={customNote}
               onChange={(e) => handleNoteChange(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-xl border border-stone-200 focus:outline-none focus:border-[#DA6868] text-stone-700 placeholder:text-stone-400"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-stone-200 focus:outline-none focus:border-[#DA6868] text-stone-700 placeholder:text-stone-400 mb-2.5"
             />
+
+            {/* Pilihan Font */}
+            <div className="flex items-center gap-1.5 mb-2.5 overflow-x-auto pb-1">
+              <span className="text-[11px] font-medium text-stone-400 shrink-0">Font:</span>
+              {NOTE_FONTS.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => handleFontChange(f.family)}
+                  className={`px-2.5 py-1 rounded-lg text-xs transition shrink-0 ${
+                    noteFont === f.family
+                      ? 'bg-rose-50 text-[#DA6868] font-bold border border-rose-200'
+                      : 'bg-stone-50 text-stone-600 border border-stone-100'
+                  }`}
+                  style={{ fontFamily: f.family }}
+                >
+                  {f.name}
+                </button>
+              ))}
+            </div>
+
+            {/* Pilihan Warna */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-medium text-stone-400 shrink-0">Warna:</span>
+              <div className="flex items-center gap-1.5">
+                {NOTE_COLORS.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => handleColorChange(c.value)}
+                    className={`w-6 h-6 rounded-full border-2 transition active:scale-95 ${
+                      noteColor === c.value ? 'border-stone-800 scale-110 shadow-xs' : 'border-white'
+                    }`}
+                    style={{ backgroundColor: c.value }}
+                    title={c.name}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* Pratinjau Kertas Strip */}
@@ -1173,7 +1286,7 @@ export default function SoloPhotobooth() {
                 ? 'max-w-[320px]'
                 : selectedLayout === 'strip3'
                 ? 'max-w-[250px]'
-                : 'max-w-[270px]'
+                : 'max-w-[280px]'
             }`}
           >
             {/* eslint-disable-next-html-element/no-img-element */}
@@ -1267,13 +1380,31 @@ export default function SoloPhotobooth() {
         onSelectLayout={(layout) => {
           setSelectedLayout(layout);
           if (capturedPhotos.length > 0) {
-            generatePhotoStrip(capturedPhotos, selectedTemplate, selectedFilter, customNote, layout, placedStickers);
+            generatePhotoStrip(
+              capturedPhotos,
+              selectedTemplate,
+              selectedFilter,
+              customNote,
+              layout,
+              placedStickers,
+              noteFont,
+              noteColor
+            );
           }
         }}
         onSelectTemplate={(tpl) => {
           setSelectedTemplate(tpl);
           if (capturedPhotos.length > 0) {
-            generatePhotoStrip(capturedPhotos, tpl, selectedFilter, customNote, selectedLayout, placedStickers);
+            generatePhotoStrip(
+              capturedPhotos,
+              tpl,
+              selectedFilter,
+              customNote,
+              selectedLayout,
+              placedStickers,
+              noteFont,
+              noteColor
+            );
           }
         }}
       />

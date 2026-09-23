@@ -34,6 +34,21 @@ const PHOTO_FILTERS = {
 
 type PhotoFilterKey = keyof typeof PHOTO_FILTERS;
 
+const NOTE_FONTS = [
+  { id: 'sans', name: 'Modern', family: 'sans-serif' },
+  { id: 'serif', name: 'Elegan', family: 'Georgia, serif' },
+  { id: 'hand', name: 'Aesthetic', family: 'cursive' },
+  { id: 'mono', name: 'Retro Tik', family: 'Courier New, monospace' },
+] as const;
+
+const NOTE_COLORS = [
+  { id: 'coral', name: 'Coral', value: '#DA6868' },
+  { id: 'dark', name: 'Hitam', value: '#1E293B' },
+  { id: 'white', name: 'Putih', value: '#FFFFFF' },
+  { id: 'brown', name: 'Earthy', value: '#8B5E3C' },
+  { id: 'lavender', name: 'Lilac', value: '#8B5CF6' },
+] as const;
+
 // Fungsi Bantu: Memindai Lubang Transparan Otomatis dari Gambar Frame PNG
 const detectPhotoSlots = (
   img: HTMLImageElement,
@@ -138,8 +153,13 @@ export default function DuoPhotobooth() {
   const [selectedFilter, setSelectedFilter] = useState<PhotoFilterKey>('normal');
   const selectedFilterRef = useRef<PhotoFilterKey>('normal');
 
+  // Catatan, Font, & Warna
   const [customNote, setCustomNote] = useState<string>('');
   const customNoteRef = useRef<string>('');
+  const [noteFont, setNoteFont] = useState<string>('sans-serif');
+  const noteFontRef = useRef<string>('sans-serif');
+  const [noteColor, setNoteColor] = useState<string>('#DA6868');
+  const noteColorRef = useRef<string>('#DA6868');
 
   // Status Jepret
   const [isCapturing, setIsCapturing] = useState(false);
@@ -170,6 +190,14 @@ export default function DuoPhotobooth() {
   useEffect(() => {
     customNoteRef.current = customNote;
   }, [customNote]);
+
+  useEffect(() => {
+    noteFontRef.current = noteFont;
+  }, [noteFont]);
+
+  useEffect(() => {
+    noteColorRef.current = noteColor;
+  }, [noteColor]);
 
   const initAudio = useCallback(() => {
     if (!audioCtxRef.current) {
@@ -316,7 +344,9 @@ export default function DuoPhotobooth() {
       template: FrameTemplate = selectedTemplateRef.current,
       filterKey: PhotoFilterKey = selectedFilterRef.current,
       note: string = customNoteRef.current,
-      layout: LayoutMode = selectedLayoutRef.current
+      layout: LayoutMode = selectedLayoutRef.current,
+      currentFont: string = noteFontRef.current,
+      currentColor: string = noteColorRef.current
     ) => {
       setIsGeneratingStrip(true);
       const canvas = document.createElement('canvas');
@@ -426,11 +456,10 @@ export default function DuoPhotobooth() {
         // Tempelkan Overlay Bingkai PNG di atas foto
         ctx.drawImage(overlayImg, 0, 0, W, H);
 
-// ================= WATERMARK RESMI DEKATAN =================
+        // ================= WATERMARK RESMI DEKATAN =================
         const darkColors = ['#18181B', '#232931', '#450A0A', '#0F172A', '#DA6868'];
         const isDarkTheme = (template as any)?.isDark || darkColors.includes(template.bg);
 
-        // 1. Logo Dekatan
         const logoImg = document.createElement('img');
         logoImg.src = isDarkTheme ? '/dekatan-white.png' : '/dekatan1.png';
         await new Promise((resolve) => {
@@ -443,14 +472,12 @@ export default function DuoPhotobooth() {
           ? (logoImg.naturalHeight / logoImg.naturalWidth) * logoW
           : 36;
         const logoX = (W - logoW) / 2;
-        // Posisi logo diangkat sedikit agar pas dengan teks tanggal di bawahnya
         const logoY = H - logoH - (isStory916 ? 60 : 42);
 
         if (logoImg.complete && logoImg.naturalWidth !== 0) {
           ctx.drawImage(logoImg, logoX, logoY, logoW, logoH);
         }
 
-        // 2. Format Tanggal & Jam (Contoh: 16 September 2026 • 11.35 WITA)
         const now = new Date();
         const formattedDate = now.toLocaleDateString('id-ID', {
           day: 'numeric',
@@ -470,12 +497,12 @@ export default function DuoPhotobooth() {
         ctx.textAlign = 'center';
         ctx.fillText(`${formattedDate} • ${formattedTime} WITA`, W / 2, dateTextY);
 
-        // 3. Catatan Kustom Pengguna (Jika Ada)
         if (note.trim()) {
-          ctx.font = isStory916 ? '600 20px sans-serif' : '600 14px sans-serif';
-          ctx.fillStyle = isDarkTheme ? '#FFFFFF' : '#DA6868';
+          const fontSize = isStory916 ? 22 : 15;
+          ctx.font = `600 ${fontSize}px ${currentFont}`;
+          ctx.fillStyle = currentColor;
           ctx.textAlign = 'center';
-          ctx.fillText(`“${note.trim()}”`, W / 2, logoY - (isStory916 ? 20 : 14));
+          ctx.fillText(`“${note.trim()}”`, W / 2, logoY - (isStory916 ? 22 : 15));
         }
       } else {
         // ================= 2. TEMPLATE STANDAR FREMIO (BAWAAN) =================
@@ -650,16 +677,18 @@ export default function DuoPhotobooth() {
           month: 'long',
           year: 'numeric',
         });
-        const formattedTime = now.toLocaleTimeString('id-ID', {
-          hour: '2-digit',
-          minute: '2-digit',
-        });
+        const formattedTime = now
+          .toLocaleTimeString('id-ID', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+          .replace(':', '.');
 
         let currentTextY = logoY + logoHeight + 24;
 
         if (note.trim()) {
-          ctx.font = '600 15px sans-serif';
-          ctx.fillStyle = '#DA6868';
+          ctx.font = `600 15px ${currentFont}`;
+          ctx.fillStyle = currentColor;
           ctx.textAlign = 'center';
           ctx.fillText(`“${note.trim()}”`, stripWidth / 2, currentTextY);
           currentTextY += 24;
@@ -782,7 +811,9 @@ export default function DuoPhotobooth() {
       selectedTemplateRef.current,
       selectedFilterRef.current,
       customNoteRef.current,
-      selectedLayoutRef.current
+      selectedLayoutRef.current,
+      noteFontRef.current,
+      noteColorRef.current
     );
   }, [initAudio, playBeepSound, playShutterSound, generateDuoStrip]);
 
@@ -808,7 +839,9 @@ export default function DuoPhotobooth() {
               selectedTemplateRef.current,
               selectedFilterRef.current,
               customNoteRef.current,
-              data.layout
+              data.layout,
+              noteFontRef.current,
+              noteColorRef.current
             );
           }
         } else if (data?.type === 'TEMPLATE_CHANGE' && data?.template) {
@@ -820,7 +853,9 @@ export default function DuoPhotobooth() {
               data.template,
               selectedFilterRef.current,
               customNoteRef.current,
-              selectedLayoutRef.current
+              selectedLayoutRef.current,
+              noteFontRef.current,
+              noteColorRef.current
             );
           }
         } else if (data?.type === 'FILTER_CHANGE' && data?.filter) {
@@ -832,7 +867,9 @@ export default function DuoPhotobooth() {
               selectedTemplateRef.current,
               data.filter,
               customNoteRef.current,
-              selectedLayoutRef.current
+              selectedLayoutRef.current,
+              noteFontRef.current,
+              noteColorRef.current
             );
           }
         } else if (data?.type === 'NOTE_CHANGE' && typeof data?.note === 'string') {
@@ -844,7 +881,37 @@ export default function DuoPhotobooth() {
               selectedTemplateRef.current,
               selectedFilterRef.current,
               data.note,
-              selectedLayoutRef.current
+              selectedLayoutRef.current,
+              noteFontRef.current,
+              noteColorRef.current
+            );
+          }
+        } else if (data?.type === 'FONT_CHANGE' && typeof data?.font === 'string') {
+          setNoteFont(data.font);
+          noteFontRef.current = data.font;
+          if (capturedPhotosRef.current.length > 0) {
+            generateDuoStrip(
+              capturedPhotosRef.current,
+              selectedTemplateRef.current,
+              selectedFilterRef.current,
+              customNoteRef.current,
+              selectedLayoutRef.current,
+              data.font,
+              noteColorRef.current
+            );
+          }
+        } else if (data?.type === 'COLOR_CHANGE' && typeof data?.color === 'string') {
+          setNoteColor(data.color);
+          noteColorRef.current = data.color;
+          if (capturedPhotosRef.current.length > 0) {
+            generateDuoStrip(
+              capturedPhotosRef.current,
+              selectedTemplateRef.current,
+              selectedFilterRef.current,
+              customNoteRef.current,
+              selectedLayoutRef.current,
+              noteFontRef.current,
+              data.color
             );
           }
         }
@@ -948,7 +1015,15 @@ export default function DuoPhotobooth() {
     setSelectedLayout(newLayout);
     selectedLayoutRef.current = newLayout;
     if (capturedPhotos.length > 0) {
-      generateDuoStrip(capturedPhotos, selectedTemplate, selectedFilter, customNote, newLayout);
+      generateDuoStrip(
+        capturedPhotos,
+        selectedTemplate,
+        selectedFilter,
+        customNote,
+        newLayout,
+        noteFont,
+        noteColor
+      );
     }
     if (connRef.current) {
       connRef.current.send({ type: 'LAYOUT_CHANGE', layout: newLayout });
@@ -959,7 +1034,15 @@ export default function DuoPhotobooth() {
     setSelectedTemplate(tpl);
     selectedTemplateRef.current = tpl;
     if (capturedPhotos.length > 0) {
-      generateDuoStrip(capturedPhotos, tpl, selectedFilter, customNote, selectedLayout);
+      generateDuoStrip(
+        capturedPhotos,
+        tpl,
+        selectedFilter,
+        customNote,
+        selectedLayout,
+        noteFont,
+        noteColor
+      );
     }
     if (connRef.current) {
       connRef.current.send({ type: 'TEMPLATE_CHANGE', template: tpl });
@@ -978,7 +1061,15 @@ export default function DuoPhotobooth() {
     setSelectedFilter(newFilter);
     selectedFilterRef.current = newFilter;
     if (capturedPhotos.length > 0) {
-      generateDuoStrip(capturedPhotos, selectedTemplate, newFilter, customNote, selectedLayout);
+      generateDuoStrip(
+        capturedPhotos,
+        selectedTemplate,
+        newFilter,
+        customNote,
+        selectedLayout,
+        noteFont,
+        noteColor
+      );
     }
     if (connRef.current) {
       connRef.current.send({ type: 'FILTER_CHANGE', filter: newFilter });
@@ -989,10 +1080,56 @@ export default function DuoPhotobooth() {
     setCustomNote(text);
     customNoteRef.current = text;
     if (capturedPhotos.length > 0) {
-      generateDuoStrip(capturedPhotos, selectedTemplate, selectedFilter, text, selectedLayout);
+      generateDuoStrip(
+        capturedPhotos,
+        selectedTemplate,
+        selectedFilter,
+        text,
+        selectedLayout,
+        noteFont,
+        noteColor
+      );
     }
     if (connRef.current) {
       connRef.current.send({ type: 'NOTE_CHANGE', note: text });
+    }
+  };
+
+  const handleFontChange = (fontFamily: string) => {
+    setNoteFont(fontFamily);
+    noteFontRef.current = fontFamily;
+    if (capturedPhotos.length > 0) {
+      generateDuoStrip(
+        capturedPhotos,
+        selectedTemplate,
+        selectedFilter,
+        customNote,
+        selectedLayout,
+        fontFamily,
+        noteColor
+      );
+    }
+    if (connRef.current) {
+      connRef.current.send({ type: 'FONT_CHANGE', font: fontFamily });
+    }
+  };
+
+  const handleColorChange = (colorValue: string) => {
+    setNoteColor(colorValue);
+    noteColorRef.current = colorValue;
+    if (capturedPhotos.length > 0) {
+      generateDuoStrip(
+        capturedPhotos,
+        selectedTemplate,
+        selectedFilter,
+        customNote,
+        selectedLayout,
+        noteFont,
+        colorValue
+      );
+    }
+    if (connRef.current) {
+      connRef.current.send({ type: 'COLOR_CHANGE', color: colorValue });
     }
   };
 
@@ -1269,8 +1406,8 @@ export default function DuoPhotobooth() {
             })}
           </div>
 
-          {/* Catatan Singkat */}
-          <div className="w-full bg-white p-3 rounded-2xl shadow-xs border border-stone-200 mb-3">
+          {/* Catatan Singkat dengan Pilihan Font & Warna */}
+          <div className="w-full bg-white p-3.5 rounded-2xl shadow-xs border border-stone-200 mb-3">
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs font-semibold text-stone-600">
                 Catatan Berdua / Nama Kalian:
@@ -1285,8 +1422,45 @@ export default function DuoPhotobooth() {
               placeholder="Contoh: Eko & Pasangan — Jarak Bukan Halangan"
               value={customNote}
               onChange={(e) => handleNoteChange(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-xl border border-stone-200 focus:outline-none focus:border-[#DA6868] text-stone-700 placeholder:text-stone-400"
+              className="w-full px-3 py-2 text-xs rounded-xl border border-stone-200 focus:outline-none focus:border-[#DA6868] text-stone-700 placeholder:text-stone-400 mb-2.5"
             />
+
+            {/* Pilihan Font */}
+            <div className="flex items-center gap-1.5 mb-2.5 overflow-x-auto pb-1">
+              <span className="text-[11px] font-medium text-stone-400 shrink-0">Font:</span>
+              {NOTE_FONTS.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => handleFontChange(f.family)}
+                  className={`px-2.5 py-1 rounded-lg text-xs transition shrink-0 ${
+                    noteFont === f.family
+                      ? 'bg-rose-50 text-[#DA6868] font-bold border border-rose-200'
+                      : 'bg-stone-50 text-stone-600 border border-stone-100'
+                  }`}
+                  style={{ fontFamily: f.family }}
+                >
+                  {f.name}
+                </button>
+              ))}
+            </div>
+
+            {/* Pilihan Warna */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-medium text-stone-400 shrink-0">Warna:</span>
+              <div className="flex items-center gap-1.5">
+                {NOTE_COLORS.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => handleColorChange(c.value)}
+                    className={`w-6 h-6 rounded-full border-2 transition active:scale-95 ${
+                      noteColor === c.value ? 'border-stone-800 scale-110 shadow-xs' : 'border-white'
+                    }`}
+                    style={{ backgroundColor: c.value }}
+                    title={c.name}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* Gambar Akhir */}
@@ -1323,7 +1497,7 @@ export default function DuoPhotobooth() {
         </div>
       )}
 
-      {/* Modal Katalog Fremio untuk Mode Duo */}
+      {/* Modal Katalog Frame */}
       <TemplateSelectorModal
         isOpen={isTemplateModalOpen}
         onClose={() => setIsTemplateModalOpen(false)}
