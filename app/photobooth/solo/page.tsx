@@ -433,10 +433,11 @@ export default function SoloPhotobooth() {
         // Tempelkan Overlay Bingkai PNG di atas foto
         ctx.drawImage(overlayImg, 0, 0, W, H);
 
-        // Logo Dekatan di Bawah Kanvas
+// ================= WATERMARK RESMI DEKATAN =================
         const darkColors = ['#18181B', '#232931', '#450A0A', '#0F172A', '#DA6868'];
         const isDarkTheme = (template as any)?.isDark || darkColors.includes(template.bg);
 
+        // 1. Logo Dekatan
         const logoImg = document.createElement('img');
         logoImg.src = isDarkTheme ? '/dekatan-white.png' : '/dekatan1.png';
         await new Promise((resolve) => {
@@ -449,10 +450,39 @@ export default function SoloPhotobooth() {
           ? (logoImg.naturalHeight / logoImg.naturalWidth) * logoW
           : 36;
         const logoX = (W - logoW) / 2;
-        const logoY = H - logoH - (isStory916 ? 35 : 20);
+        // Posisi logo diangkat sedikit agar pas dengan teks tanggal di bawahnya
+        const logoY = H - logoH - (isStory916 ? 60 : 42);
 
         if (logoImg.complete && logoImg.naturalWidth !== 0) {
           ctx.drawImage(logoImg, logoX, logoY, logoW, logoH);
+        }
+
+        // 2. Format Tanggal & Jam (Contoh: 16 September 2026 • 11.35 WITA)
+        const now = new Date();
+        const formattedDate = now.toLocaleDateString('id-ID', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        });
+        const formattedTime = now
+          .toLocaleTimeString('id-ID', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+          .replace(':', '.');
+
+        const dateTextY = logoY + logoH + (isStory916 ? 24 : 16);
+        ctx.font = isStory916 ? '500 18px sans-serif' : '500 12px sans-serif';
+        ctx.fillStyle = isDarkTheme ? 'rgba(255, 255, 255, 0.85)' : '#64748B';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${formattedDate} • ${formattedTime} WITA`, W / 2, dateTextY);
+
+        // 3. Catatan Kustom Pengguna (Jika Ada)
+        if (note.trim()) {
+          ctx.font = isStory916 ? '600 20px sans-serif' : '600 14px sans-serif';
+          ctx.fillStyle = isDarkTheme ? '#FFFFFF' : '#DA6868';
+          ctx.textAlign = 'center';
+          ctx.fillText(`“${note.trim()}”`, W / 2, logoY - (isStory916 ? 20 : 14));
         }
 
         if (note.trim()) {
