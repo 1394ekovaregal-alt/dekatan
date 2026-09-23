@@ -18,6 +18,9 @@ import {
   BarChart3,
   Activity,
   Sparkles,
+  Pencil,
+  Check,
+  X,
 } from 'lucide-react';
 import {
   collection,
@@ -27,6 +30,7 @@ import {
   doc,
   deleteDoc,
   addDoc,
+  setDoc,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -66,8 +70,12 @@ export default function AdminDashboardPage() {
   const [templates, setTemplates] = useState<CustomTemplate[]>([]);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(true);
 
-  // State Pengunjung
+  // State Pengunjung & Target Beta
   const [visitorCount, setVisitorCount] = useState<number>(0);
+  const [betaTarget, setBetaTarget] = useState<number>(50);
+  const [isEditingTarget, setIsEditingTarget] = useState(false);
+  const [inputTarget, setInputTarget] = useState<string>('50');
+  const [isSavingTarget, setIsSavingTarget] = useState(false);
   const [isLoadingVisitors, setIsLoadingVisitors] = useState(true);
 
   // Form State Upload Template
@@ -136,7 +144,7 @@ export default function AdminDashboardPage() {
     return () => unsubscribe();
   }, [isAuthenticated]);
 
-  // 3. Dengarkan Statistik Pengunjung Real-time
+  // 3. Dengarkan Statistik Pengunjung & Target Beta Real-time
   useEffect(() => {
     if (!isAuthenticated) return;
     setIsLoadingVisitors(true);
@@ -144,7 +152,11 @@ export default function AdminDashboardPage() {
       doc(db, 'stats', 'visitors'),
       (docSnap) => {
         if (docSnap.exists()) {
-          setVisitorCount(docSnap.data()?.total || 0);
+          const data = docSnap.data();
+          setVisitorCount(data?.total || 0);
+          const target = data?.betaTarget ?? 50;
+          setBetaTarget(target);
+          setInputTarget(target.toString());
         }
         setIsLoadingVisitors(false);
       },
@@ -155,6 +167,31 @@ export default function AdminDashboardPage() {
     );
     return () => unsubscribe();
   }, [isAuthenticated]);
+
+  // Simpan Target Sesi Beta Baru ke Firestore
+  const handleSaveTarget = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const newTarget = parseInt(inputTarget, 10);
+    if (isNaN(newTarget) || newTarget <= 0) {
+      alert('Masukkan angka target yang valid (minimal 1)!');
+      return;
+    }
+
+    setIsSavingTarget(true);
+    try {
+      await setDoc(
+        doc(db, 'stats', 'visitors'),
+        { betaTarget: newTarget },
+        { merge: true }
+      );
+      setIsEditingTarget(false);
+    } catch (err) {
+      console.error('Gagal menyimpan target beta:', err);
+      alert('Gagal menyimpan target ke database.');
+    } finally {
+      setIsSavingTarget(false);
+    }
+  };
 
   // Hapus Masukan
   const handleDeleteFeedback = async (id: string) => {
@@ -628,35 +665,82 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
-            {/* Target Uji Coba Beta */}
+            {/* Target Uji Coba Beta (Bisa Diatur Langsung) */}
             <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">
                   Target Sesi Beta
                 </span>
-                <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center">
-                  <Sparkles className="w-5 h-5" />
+                <div className="flex items-center gap-1.5">
+                  {!isEditingTarget && (
+                    <button
+                      onClick={() => {
+                        setInputTarget(betaTarget.toString());
+                        setIsEditingTarget(true);
+                      }}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#DA6868] bg-rose-50 px-2 py-0.5 rounded-lg hover:bg-rose-100 transition"
+                      title="Ubah Target"
+                    >
+                      <Pencil className="w-3 h-3" />
+                      Ubah
+                    </button>
+                  )}
+                  <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
                 </div>
               </div>
+
               <div>
-                <h3 className="text-3xl font-extrabold text-stone-800">
-                  50 <span className="text-xs font-semibold text-stone-400">Sesi Awal</span>
-                </h3>
+                {isEditingTarget ? (
+                  <form onSubmit={handleSaveTarget} className="flex items-center gap-1.5 mb-2">
+                    <input
+                      type="number"
+                      min="1"
+                      value={inputTarget}
+                      onChange={(e) => setInputTarget(e.target.value)}
+                      className="w-24 px-2.5 py-1 text-sm font-bold border border-stone-300 rounded-xl focus:outline-none focus:border-[#DA6868]"
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSavingTarget}
+                      className="p-1.5 bg-[#DA6868] text-white rounded-lg hover:bg-[#c85656] transition"
+                      title="Simpan"
+                    >
+                      <Check className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingTarget(false)}
+                      className="p-1.5 bg-stone-200 text-stone-600 rounded-lg hover:bg-stone-300 transition"
+                      title="Batal"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </form>
+                ) : (
+                  <h3 className="text-3xl font-extrabold text-stone-800">
+                    {betaTarget} <span className="text-xs font-semibold text-stone-400">Sesi Target</span>
+                  </h3>
+                )}
+
+                {/* Bar Progres Dinamis */}
                 <div className="w-full bg-stone-100 h-2 rounded-full overflow-hidden mt-3">
                   <div
                     className="bg-amber-500 h-full rounded-full transition-all duration-500"
                     style={{
-                      width: `${Math.min(100, Math.round((visitorCount / 50) * 100))}%`,
+                      width: `${Math.min(100, Math.round((visitorCount / (betaTarget || 1)) * 100))}%`,
                     }}
                   />
                 </div>
                 <p className="text-[10px] text-stone-400 mt-1.5">
-                  Progres: {Math.min(100, Math.round((visitorCount / 50) * 100))}% dari kuota awal
+                  Progres: {Math.min(100, Math.round((visitorCount / (betaTarget || 1)) * 100))}% dari target
                 </p>
               </div>
             </div>
 
-            {/* Status Sistem */}
+            {/* Status Server */}
             <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm flex flex-col justify-between">
               <div className="flex items-center justify-between mb-4">
                 <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">
@@ -686,7 +770,7 @@ export default function AdminDashboardPage() {
               Setiap kali seseorang membuka halaman utama web Dekatan di perangkat HP atau laptop, sistem akan menambahkan 1 hitungan ke Firestore (<code className="bg-stone-100 px-1.5 py-0.5 rounded text-stone-700">stats/visitors</code>).
             </p>
             <div className="p-3 bg-stone-50 rounded-2xl border border-stone-200 text-[11px] text-stone-600">
-              💡 <strong>Catatan:</strong> Refresh berulang kali dalam satu sesi browser tidak akan menambah hitungan ganda karena sistem menggunakan validasi sesi di peramban.
+              💡 <strong>Catatan:</strong> Tombol <strong>Ubah</strong> di kartu target memungkinkan kamu menaikkan kuota uji coba (misal: 100 atau 200) kapan saja tanpa harus mengubah kode pemrograman.
             </div>
           </div>
         </div>
