@@ -34,6 +34,79 @@ const PHOTO_FILTERS = {
 
 type PhotoFilterKey = keyof typeof PHOTO_FILTERS;
 
+// Fungsi Cerdas: Deteksi Lubang Transparan Otomatis dari Gambar Frame PNG
+const detectPhotoSlots = (
+  img: HTMLImageElement,
+  targetW: number,
+  targetH: number
+): { x: number; y: number; width: number; height: number }[] => {
+  try {
+    const scanCanvas = document.createElement('canvas');
+    scanCanvas.width = targetW;
+    scanCanvas.height = targetH;
+    const scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
+    if (!scanCtx) return [];
+
+    scanCtx.drawImage(img, 0, 0, targetW, targetH);
+    const imgData = scanCtx.getImageData(0, 0, targetW, targetH).data;
+
+    const getAlpha = (x: number, y: number) => {
+      if (x < 0 || x >= targetW || y < 0 || y >= targetH) return 255;
+      return imgData[(y * targetW + x) * 4 + 3];
+    };
+
+    const centerX = Math.round(targetW / 2);
+    const verticalSegments: { startY: number; endY: number }[] = [];
+    let inSlot = false;
+    let startY = 0;
+
+    // Pindai dari atas ke bawah pada garis tengah vertikal kanvas
+    for (let y = 10; y < targetH - 10; y++) {
+      const a = getAlpha(centerX, y);
+      const isTransparent = a < 90;
+
+      if (isTransparent && !inSlot) {
+        inSlot = true;
+        startY = y;
+      } else if (!isTransparent && inSlot) {
+        inSlot = false;
+        if (y - startY > 60) {
+          verticalSegments.push({ startY, endY: y });
+        }
+      }
+    }
+    if (inSlot && targetH - startY > 60) {
+      verticalSegments.push({ startY, endY: targetH - 10 });
+    }
+
+    if (verticalSegments.length < 3) return [];
+
+    // Margin bleed 8px di balik bingkai agar foto terselip rapi tanpa celah putih
+    const bleed = 8;
+    return verticalSegments.map((seg) => {
+      const midY = Math.round((seg.startY + seg.endY) / 2);
+      let leftX = centerX;
+      while (leftX > 10 && getAlpha(leftX, midY) < 100) {
+        leftX--;
+      }
+      let rightX = centerX;
+      while (rightX < targetW - 10 && getAlpha(rightX, midY) < 100) {
+        rightX++;
+      }
+      const w = rightX - leftX;
+      const h = seg.endY - seg.startY;
+      return {
+        x: Math.max(0, leftX - bleed),
+        y: Math.max(0, seg.startY - bleed),
+        width: w + bleed * 2,
+        height: h + bleed * 2,
+      };
+    });
+  } catch (_) {
+    return [];
+  }
+};
+
 export default function DuoPhotobooth() {
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -251,208 +324,315 @@ export default function DuoPhotobooth() {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const isGrid = layout === 'grid';
-      const isStrip3 = layout === 'strip3';
-      const padding = 32;
-      const spacing = 18;
-      const footerHeight = note.trim() ? 235 : 195;
+      const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
+      let overlayImg: HTMLImageElement | null = null;
 
-      let stripWidth = 560;
-      let photoWidth = 0;
-      let photoHeight = 0;
-      let totalHeight = 0;
-
-      const photoCount = isStrip3 ? 3 : 4;
-      const renderPhotos = photos.slice(0, photoCount);
-
-      if (isGrid) {
-        stripWidth = 640;
-        photoWidth = Math.round((stripWidth - padding * 2 - spacing) / 2);
-        photoHeight = Math.round(photoWidth * (3 / 4));
-        totalHeight = padding * 2 + photoHeight * 2 + spacing + footerHeight;
-      } else if (isStrip3) {
-        stripWidth = 560;
-        photoWidth = stripWidth - padding * 2;
-        photoHeight = Math.round(photoWidth * (3 / 4));
-        totalHeight = padding * 2 + photoHeight * 3 + spacing * 2 + footerHeight;
-      } else {
-        stripWidth = 560;
-        photoWidth = stripWidth - padding * 2;
-        photoHeight = Math.round(photoWidth * (3 / 4));
-        totalHeight = padding * 2 + photoHeight * 4 + spacing * 3 + footerHeight;
-      }
-
-      canvas.width = stripWidth;
-      canvas.height = totalHeight;
-
-      // 1. Warna Dasar Bingkai
-      ctx.fillStyle = template.bg;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // 2. Corak Film
-      if (template.pattern === 'film') {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-        const holeH = 14;
-        const holeW = 8;
-        for (let y = 15; y < totalHeight - 20; y += 26) {
-          ctx.fillRect(6, y, holeW, holeH);
-          ctx.fillRect(stripWidth - 14, y, holeW, holeH);
-        }
-      }
-
-      // 3. Render Foto Berdua dengan Bentuk Potongan
-      for (let i = 0; i < renderPhotos.length; i++) {
-        const img = new (window as any).Image();
-        img.src = renderPhotos[i];
+      if (hasCustomOverlay) {
+        const img = document.createElement('img');
+        img.crossOrigin = 'anonymous';
+        img.src = (template as any).overlayUrl;
         await new Promise((resolve) => {
           img.onload = resolve;
+          img.onerror = resolve;
         });
+        overlayImg = img;
+      }
 
-        let xPos = padding;
-        let yPos = padding;
+      // Helper untuk menggambar foto dengan object-fit cover
+      const drawCoverImage = (
+        img: HTMLImageElement,
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        radius: number = 0
+      ) => {
+        const imgRatio = img.width / img.height;
+        const targetRatio = w / h;
+        let sx = 0;
+        let sy = 0;
+        let sWidth = img.width;
+        let sHeight = img.height;
+
+        if (imgRatio > targetRatio) {
+          sWidth = img.height * targetRatio;
+          sx = (img.width - sWidth) / 2;
+        } else {
+          sHeight = img.width / targetRatio;
+          sy = (img.height - sHeight) / 2;
+        }
+
+        ctx.save();
+        if (radius > 0) {
+          ctx.beginPath();
+          ctx.roundRect(x, y, w, h, radius);
+          ctx.clip();
+        }
+        ctx.filter = PHOTO_FILTERS[filterKey].filter;
+        ctx.drawImage(img, sx, sy, sWidth, sHeight, x, y, w, h);
+        ctx.restore();
+      };
+
+      // ================= 1. JIKA MENGGUNAKAN TEMPLATE ADMIN (AUTO-DETECT SLOTS & ANTI-KETARIK) =================
+      if (hasCustomOverlay && overlayImg && overlayImg.naturalWidth > 0) {
+        const overlayRatio = overlayImg.naturalWidth / overlayImg.naturalHeight;
+        const isStory916 = overlayRatio > 0.45;
+
+        let W = 600;
+        let H = Math.round(W / overlayRatio);
+
+        if (isStory916) {
+          W = 1080;
+          H = 1920;
+        }
+
+        canvas.width = W;
+        canvas.height = H;
+
+        ctx.fillStyle = template.bg || '#FAF7F2';
+        ctx.fillRect(0, 0, W, H);
+
+        const renderPhotos = photos.slice(0, 4);
+        const autoSlots = detectPhotoSlots(overlayImg, W, H);
+
+        if (autoSlots.length >= renderPhotos.length) {
+          // Posisi otomatis dari pemindaian lubang transparan
+          for (let i = 0; i < renderPhotos.length; i++) {
+            const img = document.createElement('img');
+            img.src = renderPhotos[i];
+            await new Promise((resolve) => {
+              img.onload = resolve;
+            });
+
+            const slot = autoSlots[i];
+            drawCoverImage(img, slot.x, slot.y, slot.width, slot.height, 4);
+          }
+        } else {
+          // Cadangan jika pembacaan piksel browser terblokir
+          const photoW = isStory916 ? 530 : 520;
+          const photoH = isStory916 ? 375 : 374;
+          const posX = (W - photoW) / 2;
+          const startY = isStory916 ? 180 : 55;
+          const gap = isStory916 ? 28 : 30;
+
+          for (let i = 0; i < renderPhotos.length; i++) {
+            const img = document.createElement('img');
+            img.src = renderPhotos[i];
+            await new Promise((resolve) => {
+              img.onload = resolve;
+            });
+
+            const y = startY + i * (photoH + gap);
+            drawCoverImage(img, posX, y, photoW, photoH, 6);
+          }
+        }
+
+        // Tempelkan Overlay Bingkai PNG di atas foto
+        ctx.drawImage(overlayImg, 0, 0, W, H);
+
+        if (note.trim()) {
+          ctx.font = '600 20px sans-serif';
+          ctx.fillStyle = (template as any)?.isDark ? '#FFFFFF' : '#DA6868';
+          ctx.textAlign = 'center';
+          ctx.fillText(`“${note.trim()}”`, W / 2, H - 40);
+        }
+      } else {
+        // ================= 2. TEMPLATE STANDAR FREMIO (BAWAAN) =================
+        const isGrid = layout === 'grid';
+        const isStrip3 = layout === 'strip3';
+        const padding = 32;
+        const spacing = 18;
+        const footerHeight = note.trim() ? 235 : 195;
+
+        let stripWidth = 560;
+        let photoWidth = 0;
+        let photoHeight = 0;
+        let totalHeight = 0;
+
+        const photoCount = isStrip3 ? 3 : 4;
+        const renderPhotos = photos.slice(0, photoCount);
 
         if (isGrid) {
-          const col = i % 2;
-          const row = Math.floor(i / 2);
-          xPos = padding + col * (photoWidth + spacing);
-          yPos = padding + row * (photoHeight + spacing);
+          stripWidth = 640;
+          photoWidth = Math.round((stripWidth - padding * 2 - spacing) / 2);
+          photoHeight = Math.round(photoWidth * (3 / 4));
+          totalHeight = padding * 2 + photoHeight * 2 + spacing + footerHeight;
+        } else if (isStrip3) {
+          stripWidth = 560;
+          photoWidth = stripWidth - padding * 2;
+          photoHeight = Math.round(photoWidth * (3 / 4));
+          totalHeight = padding * 2 + photoHeight * 3 + spacing * 2 + footerHeight;
         } else {
-          yPos = padding + i * (photoHeight + spacing);
+          stripWidth = 560;
+          photoWidth = stripWidth - padding * 2;
+          photoHeight = Math.round(photoWidth * (3 / 4));
+          totalHeight = padding * 2 + photoHeight * 4 + spacing * 3 + footerHeight;
         }
 
-        ctx.save();
+        canvas.width = stripWidth;
+        canvas.height = totalHeight;
+
+        ctx.fillStyle = template.bg;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        if (template.pattern === 'film') {
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+          const holeH = 14;
+          const holeW = 8;
+          for (let y = 15; y < totalHeight - 20; y += 26) {
+            ctx.fillRect(6, y, holeW, holeH);
+            ctx.fillRect(stripWidth - 14, y, holeW, holeH);
+          }
+        }
+
+        for (let i = 0; i < renderPhotos.length; i++) {
+          const img = document.createElement('img');
+          img.src = renderPhotos[i];
+          await new Promise((resolve) => {
+            img.onload = resolve;
+          });
+
+          let xPos = padding;
+          let yPos = padding;
+
+          if (isGrid) {
+            const col = i % 2;
+            const row = Math.floor(i / 2);
+            xPos = padding + col * (photoWidth + spacing);
+            yPos = padding + row * (photoHeight + spacing);
+          } else {
+            yPos = padding + i * (photoHeight + spacing);
+          }
+
+          const imgRatio = img.width / img.height;
+          const targetRatio = photoWidth / photoHeight;
+          let sx = 0;
+          let sy = 0;
+          let sWidth = img.width;
+          let sHeight = img.height;
+
+          if (imgRatio > targetRatio) {
+            sWidth = img.height * targetRatio;
+            sx = (img.width - sWidth) / 2;
+          } else {
+            sHeight = img.width / targetRatio;
+            sy = (img.height - sHeight) / 2;
+          }
+
+          ctx.save();
+          ctx.beginPath();
+          if (template.slotShape === 'arch') {
+            ctx.roundRect(xPos, yPos, photoWidth, photoHeight, [photoWidth / 2, photoWidth / 2, 8, 8]);
+          } else if (template.slotShape === 'rounded') {
+            ctx.roundRect(xPos, yPos, photoWidth, photoHeight, 16);
+          } else if (template.slotShape === 'heart') {
+            const topCurveHeight = photoHeight * 0.3;
+            ctx.moveTo(xPos + photoWidth / 2, yPos + photoHeight);
+            ctx.bezierCurveTo(
+              xPos,
+              yPos + photoHeight * 0.7,
+              xPos,
+              yPos + topCurveHeight,
+              xPos + photoWidth / 4,
+              yPos
+            );
+            ctx.bezierCurveTo(
+              xPos + photoWidth / 2,
+              yPos,
+              xPos + photoWidth / 2,
+              yPos + topCurveHeight,
+              xPos + photoWidth / 2,
+              yPos + topCurveHeight
+            );
+            ctx.bezierCurveTo(
+              xPos + photoWidth / 2,
+              yPos + topCurveHeight,
+              xPos + photoWidth / 2,
+              yPos,
+              xPos + (photoWidth * 3) / 4,
+              yPos
+            );
+            ctx.bezierCurveTo(
+              xPos + photoWidth,
+              yPos + topCurveHeight,
+              xPos + photoWidth,
+              yPos + photoHeight * 0.7,
+              xPos + photoWidth / 2,
+              yPos + photoHeight
+            );
+          } else {
+            ctx.rect(xPos, yPos, photoWidth, photoHeight);
+          }
+          ctx.clip();
+
+          ctx.filter = PHOTO_FILTERS[filterKey].filter;
+          ctx.drawImage(img, sx, sy, sWidth, sHeight, xPos, yPos, photoWidth, photoHeight);
+          ctx.restore();
+
+          ctx.strokeStyle = template.slotBorder;
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+        }
+
+        const footerStartY = totalHeight - footerHeight;
+        ctx.strokeStyle = template.border;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        if (template.slotShape === 'arch') {
-          ctx.roundRect(xPos, yPos, photoWidth, photoHeight, [photoWidth / 2, photoWidth / 2, 8, 8]);
-        } else if (template.slotShape === 'rounded') {
-          ctx.roundRect(xPos, yPos, photoWidth, photoHeight, 16);
-        } else if (template.slotShape === 'heart') {
-          const topCurveHeight = photoHeight * 0.3;
-          ctx.moveTo(xPos + photoWidth / 2, yPos + photoHeight);
-          ctx.bezierCurveTo(
-            xPos,
-            yPos + photoHeight * 0.7,
-            xPos,
-            yPos + topCurveHeight,
-            xPos + photoWidth / 4,
-            yPos
-          );
-          ctx.bezierCurveTo(
-            xPos + photoWidth / 2,
-            yPos,
-            xPos + photoWidth / 2,
-            yPos + topCurveHeight,
-            xPos + photoWidth / 2,
-            yPos + topCurveHeight
-          );
-          ctx.bezierCurveTo(
-            xPos + photoWidth / 2,
-            yPos + topCurveHeight,
-            xPos + photoWidth / 2,
-            yPos,
-            xPos + (photoWidth * 3) / 4,
-            yPos
-          );
-          ctx.bezierCurveTo(
-            xPos + photoWidth,
-            yPos + topCurveHeight,
-            xPos + photoWidth,
-            yPos + photoHeight * 0.7,
-            xPos + photoWidth / 2,
-            yPos + photoHeight
-          );
-        } else {
-          ctx.rect(xPos, yPos, photoWidth, photoHeight);
-        }
-        ctx.clip();
-
-        ctx.filter = PHOTO_FILTERS[filterKey].filter;
-        ctx.drawImage(img, xPos, yPos, photoWidth, photoHeight);
-        ctx.restore();
-
-        ctx.strokeStyle = template.slotBorder;
-        ctx.lineWidth = 2.5;
+        ctx.moveTo(padding + 20, footerStartY + 10);
+        ctx.lineTo(stripWidth - padding - 20, footerStartY + 10);
         ctx.stroke();
-      }
 
-      // 4. Tumpukan Gambar PNG Transparan (Jika Template dari Admin)
-      if ((template as any)?.overlayUrl) {
-        const overlayImg = new (window as any).Image();
-        overlayImg.crossOrigin = 'anonymous';
-        overlayImg.src = (template as any).overlayUrl;
+        const darkColors = ['#18181B', '#232931', '#450A0A', '#0F172A', '#DA6868'];
+        const isDarkTheme = (template as any)?.isDark || darkColors.includes(template.bg);
+
+        const logoImg = document.createElement('img');
+        logoImg.src = isDarkTheme ? '/dekatan-white.png' : '/dekatan1.png';
         await new Promise((resolve) => {
-          overlayImg.onload = resolve;
-          overlayImg.onerror = resolve;
+          logoImg.onload = resolve;
+          logoImg.onerror = resolve;
         });
-        ctx.drawImage(overlayImg, 0, 0, stripWidth, totalHeight);
-      }
 
-      // 5. Garis Pembatas Bawah
-      const footerStartY = totalHeight - footerHeight;
-      ctx.strokeStyle = template.border;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(padding + 20, footerStartY + 10);
-      ctx.lineTo(stripWidth - padding - 20, footerStartY + 10);
-      ctx.stroke();
+        const logoWidth = 180;
+        const logoHeight = logoImg.naturalHeight
+          ? (logoImg.naturalHeight / logoImg.naturalWidth) * logoWidth
+          : 50;
+        const logoX = (stripWidth - logoWidth) / 2;
+        const logoY = footerStartY + 25;
 
-      // 6. Logo Dekatan (Otomatis Putih Bersih pada Tema Gelap)
-      const darkColors = ['#18181B', '#232931', '#450A0A', '#0F172A', '#DA6868'];
-      const isDarkTheme = (template as any)?.isDark || darkColors.includes(template.bg);
-
-      const logoImg = new (window as any).Image();
-      logoImg.src = '/dekatan1.png';
-      await new Promise((resolve) => {
-        logoImg.onload = resolve;
-        logoImg.onerror = resolve;
-      });
-
-      const logoWidth = 180;
-      const logoHeight = logoImg.naturalHeight
-        ? (logoImg.naturalHeight / logoImg.naturalWidth) * logoWidth
-        : 50;
-      const logoX = (stripWidth - logoWidth) / 2;
-      const logoY = footerStartY + 25;
-
-      if (logoImg.complete && logoImg.naturalWidth !== 0) {
-        ctx.save();
-        if (isDarkTheme) {
-          ctx.filter = 'brightness(0) invert(1)';
+        if (logoImg.complete && logoImg.naturalWidth !== 0) {
+          ctx.drawImage(logoImg, logoX, logoY, logoWidth, logoHeight);
         }
-        ctx.drawImage(logoImg, logoX, logoY, logoWidth, logoHeight);
-        ctx.restore();
-      }
 
-      // 7. Tanggal & Teks Footer
-      const now = new Date();
-      const formattedDate = now.toLocaleDateString('id-ID', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      });
-      const formattedTime = now.toLocaleTimeString('id-ID', {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
+        const now = new Date();
+        const formattedDate = now.toLocaleDateString('id-ID', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        });
+        const formattedTime = now.toLocaleTimeString('id-ID', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
 
-      let currentTextY = logoY + logoHeight + 24;
+        let currentTextY = logoY + logoHeight + 24;
 
-      if (note.trim()) {
-        ctx.font = '600 15px sans-serif';
-        ctx.fillStyle = '#DA6868';
+        if (note.trim()) {
+          ctx.font = '600 15px sans-serif';
+          ctx.fillStyle = '#DA6868';
+          ctx.textAlign = 'center';
+          ctx.fillText(`“${note.trim()}”`, stripWidth / 2, currentTextY);
+          currentTextY += 24;
+        }
+
+        ctx.font = '500 13px sans-serif';
+        ctx.fillStyle = template.subTextColor;
         ctx.textAlign = 'center';
-        ctx.fillText(`“${note.trim()}”`, stripWidth / 2, currentTextY);
-        currentTextY += 24;
+        ctx.fillText(`${formattedDate} • ${formattedTime} WITA`, stripWidth / 2, currentTextY);
+
+        ctx.font = '700 12px sans-serif';
+        ctx.fillStyle = template.textColor;
+        ctx.fillText(template.labelFooter || 'DEKATAN DUO', stripWidth / 2, currentTextY + 20);
       }
-
-      ctx.font = '500 13px sans-serif';
-      ctx.fillStyle = template.subTextColor;
-      ctx.textAlign = 'center';
-      ctx.fillText(`${formattedDate} • ${formattedTime} WITA`, stripWidth / 2, currentTextY);
-
-      ctx.font = '700 12px sans-serif';
-      ctx.fillStyle = template.textColor;
-      ctx.fillText(template.labelFooter || 'DEKATAN DUO', stripWidth / 2, currentTextY + 20);
 
       const dataUrl = canvas.toDataURL('image/png');
       setFinalStripUrl(dataUrl);
@@ -461,6 +641,7 @@ export default function DuoPhotobooth() {
     []
   );
 
+  // Fungsi Jepret Duo dengan Proporsi Wajah Seimbang (Anti-Gepeng)
   const captureDuoFrame = (): string => {
     const localVideo = localVideoRef.current;
     const remoteVideo = remoteVideoRef.current;
@@ -472,20 +653,56 @@ export default function DuoPhotobooth() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return '';
 
-    const halfWidth = canvas.width / 2;
-    ctx.save();
-    ctx.translate(halfWidth, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(localVideo, 0, 0, halfWidth, canvas.height);
-    ctx.restore();
+    const halfW = canvas.width / 2; // 500px
 
-    ctx.drawImage(remoteVideo, halfWidth, 0, halfWidth, canvas.height);
+    const drawVideoCover = (
+      video: HTMLVideoElement,
+      targetX: number,
+      targetY: number,
+      targetW: number,
+      targetH: number,
+      mirror: boolean = false
+    ) => {
+      const vW = video.videoWidth || 640;
+      const vH = video.videoHeight || 480;
+      const vRatio = vW / vH;
+      const tRatio = targetW / targetH;
+      let sW = vW;
+      let sH = vH;
+      let sx = 0;
+      let sy = 0;
 
+      if (vRatio > tRatio) {
+        sW = vH * tRatio;
+        sx = (vW - sW) / 2;
+      } else {
+        sH = vW / tRatio;
+        sy = (vH - sH) / 2;
+      }
+
+      ctx.save();
+      if (mirror) {
+        ctx.translate(targetX + targetW, targetY);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, sx, sy, sW, sH, 0, 0, targetW, targetH);
+      } else {
+        ctx.drawImage(video, sx, sy, sW, sH, targetX, targetY, targetW, targetH);
+      }
+      ctx.restore();
+    };
+
+    // 1. Gambar Video Kamu di Sisi Kiri (Dicerminkan agar natural)
+    drawVideoCover(localVideo, 0, 0, halfW, canvas.height, true);
+
+    // 2. Gambar Video Pasangan di Sisi Kanan
+    drawVideoCover(remoteVideo, halfW, 0, halfW, canvas.height, false);
+
+    // 3. Garis Pembatas Tipis Estetis di Tengah
     ctx.strokeStyle = '#FAF7F2';
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(halfWidth, 0);
-    ctx.lineTo(halfWidth, canvas.height);
+    ctx.moveTo(halfW, 0);
+    ctx.lineTo(halfW, canvas.height);
     ctx.stroke();
 
     return canvas.toDataURL('image/jpeg', 0.95);
@@ -1044,7 +1261,7 @@ export default function DuoPhotobooth() {
                 ? 'max-w-[320px]'
                 : selectedLayout === 'strip3'
                 ? 'max-w-[250px]'
-                : 'max-w-[270px]'
+                : 'max-w-[280px]'
             }`}
           >
             {/* eslint-disable-next-html-element/no-img-element */}

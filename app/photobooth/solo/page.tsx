@@ -46,6 +46,79 @@ interface PlacedSticker {
   scale: number;
 }
 
+// Fungsi Bantu: Memindai Lubang Transparan Otomatis dari Gambar Frame PNG
+const detectPhotoSlots = (
+  img: HTMLImageElement,
+  targetW: number,
+  targetH: number
+): { x: number; y: number; width: number; height: number }[] => {
+  try {
+    const scanCanvas = document.createElement('canvas');
+    scanCanvas.width = targetW;
+    scanCanvas.height = targetH;
+    const scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
+    if (!scanCtx) return [];
+
+    scanCtx.drawImage(img, 0, 0, targetW, targetH);
+    const imgData = scanCtx.getImageData(0, 0, targetW, targetH).data;
+
+    const getAlpha = (x: number, y: number) => {
+      if (x < 0 || x >= targetW || y < 0 || y >= targetH) return 255;
+      return imgData[(y * targetW + x) * 4 + 3];
+    };
+
+    const centerX = Math.round(targetW / 2);
+    const verticalSegments: { startY: number; endY: number }[] = [];
+    let inSlot = false;
+    let startY = 0;
+
+    // Pindai dari atas ke bawah pada garis tengah kanvas
+    for (let y = 10; y < targetH - 10; y++) {
+      const a = getAlpha(centerX, y);
+      const isTransparent = a < 90;
+
+      if (isTransparent && !inSlot) {
+        inSlot = true;
+        startY = y;
+      } else if (!isTransparent && inSlot) {
+        inSlot = false;
+        if (y - startY > 60) {
+          verticalSegments.push({ startY, endY: y });
+        }
+      }
+    }
+    if (inSlot && targetH - startY > 60) {
+      verticalSegments.push({ startY, endY: targetH - 10 });
+    }
+
+    if (verticalSegments.length < 3) return [];
+
+    // Margin bleed 8px di balik bingkai agar foto terselip rapi tanpa celah putih
+    const bleed = 8;
+    return verticalSegments.map((seg) => {
+      const midY = Math.round((seg.startY + seg.endY) / 2);
+      let leftX = centerX;
+      while (leftX > 10 && getAlpha(leftX, midY) < 100) {
+        leftX--;
+      }
+      let rightX = centerX;
+      while (rightX < targetW - 10 && getAlpha(rightX, midY) < 100) {
+        rightX++;
+      }
+      const w = rightX - leftX;
+      const h = seg.endY - seg.startY;
+      return {
+        x: Math.max(0, leftX - bleed),
+        y: Math.max(0, seg.startY - bleed),
+        width: w + bleed * 2,
+        height: h + bleed * 2,
+      };
+    });
+  } catch (_) {
+    return [];
+  }
+};
+
 export default function SoloPhotobooth() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -258,19 +331,19 @@ export default function SoloPhotobooth() {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
-    let overlayImg: HTMLImageElement | null = null;
+      const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
+      let overlayImg: HTMLImageElement | null = null;
 
-    if (hasCustomOverlay) {
-      const img = document.createElement('img');
-      img.crossOrigin = 'anonymous';
-      img.src = (template as any).overlayUrl;
-      await new Promise((resolve) => {
-        img.onload = resolve;
-        img.onerror = resolve;
-      });
-      overlayImg = img;
-    }
+      if (hasCustomOverlay) {
+        const img = document.createElement('img');
+        img.crossOrigin = 'anonymous';
+        img.src = (template as any).overlayUrl;
+        await new Promise((resolve) => {
+          img.onload = resolve;
+          img.onerror = resolve;
+        });
+        overlayImg = img;
+      }
 
       // Helper untuk menggambar foto dengan object-fit cover
       const drawCoverImage = (
@@ -307,13 +380,13 @@ const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
         ctx.restore();
       };
 
-      // ================= 1. JIKA MENGGUNAKAN TEMPLATE OVERLAY ADMIN (ANTI-KETARIK) =================
+      // ================= 1. JIKA MENGGUNAKAN TEMPLATE OVERLAY ADMIN (ANTI-CELAH & ANTI-MELAR) =================
       if (hasCustomOverlay && overlayImg && overlayImg.naturalWidth > 0) {
         const overlayRatio = overlayImg.naturalWidth / overlayImg.naturalHeight;
-        const isStory916 = overlayRatio > 0.45; // Rasio mendekati 9:16 (~0.56 seperti Y2K)
+        const isStory916 = overlayRatio > 0.45;
 
         let W = 600;
-        let H = Math.round(W / overlayRatio); // Menjaga rasio 100% presisi
+        let H = Math.round(W / overlayRatio);
 
         if (isStory916) {
           W = 1080;
@@ -323,54 +396,47 @@ const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
         canvas.width = W;
         canvas.height = H;
 
-        // Latar belakang di balik area transparan
         ctx.fillStyle = template.bg || '#FAF7F2';
         ctx.fillRect(0, 0, W, H);
 
         const renderPhotos = photos.slice(0, 4);
+        const autoSlots = detectPhotoSlots(overlayImg, W, H);
 
-        if (isStory916) {
-          // Format 9:16 Penuh (Y2K)
-          const photoW = 460;
-          const photoH = 345;
-          const posX = (W - photoW) / 2;
-          const startY = 240;
-          const gap = 45;
-
+        if (autoSlots.length >= renderPhotos.length) {
+          // Posisi otomatis dari pemindaian lubang transparan
           for (let i = 0; i < renderPhotos.length; i++) {
-            const img = new (window as any).Image();
+            const img = document.createElement('img');
             img.src = renderPhotos[i];
             await new Promise((resolve) => {
               img.onload = resolve;
             });
 
-            const y = startY + i * (photoH + gap);
-            drawCoverImage(img, posX, y, photoW, photoH, 12);
+            const slot = autoSlots[i];
+            drawCoverImage(img, slot.x, slot.y, slot.width, slot.height, 4);
           }
         } else {
-          // Format 1:3 Ramping (Roll Film & Minimalist Floral)
-          const marginX = 40;
-          const photoW = W - marginX * 2; // 520px
-          const photoH = Math.round(photoW * 0.72); // ~374px
-          const startY = 55;
-          const gap = 30;
+          // Cadangan jika kanvas tidak bisa membaca piksel (CORS terblokir)
+          const photoW = isStory916 ? 530 : 520;
+          const photoH = isStory916 ? 375 : 374;
+          const posX = (W - photoW) / 2;
+          const startY = isStory916 ? 180 : 55;
+          const gap = isStory916 ? 28 : 30;
 
           for (let i = 0; i < renderPhotos.length; i++) {
-            const img = new (window as any).Image();
+            const img = document.createElement('img');
             img.src = renderPhotos[i];
             await new Promise((resolve) => {
               img.onload = resolve;
             });
 
             const y = startY + i * (photoH + gap);
-            drawCoverImage(img, marginX, y, photoW, photoH, 8);
+            drawCoverImage(img, posX, y, photoW, photoH, 6);
           }
         }
 
-        // Tempelkan Overlay PNG di atas foto
+        // Tempelkan Overlay Bingkai PNG di atas foto
         ctx.drawImage(overlayImg, 0, 0, W, H);
 
-        // Tulis catatan kustom bila ada
         if (note.trim()) {
           ctx.font = '600 20px sans-serif';
           ctx.fillStyle = (template as any)?.isDark ? '#FFFFFF' : '#DA6868';
@@ -378,7 +444,6 @@ const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
           ctx.fillText(`“${note.trim()}”`, W / 2, H - 40);
         }
 
-        // Stiker Digital
         if (stickersToDraw && stickersToDraw.length > 0) {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -426,11 +491,9 @@ const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
         canvas.width = stripWidth;
         canvas.height = totalHeight;
 
-        // Warna Dasar Bingkai
         ctx.fillStyle = template.bg;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Corak Film
         if (template.pattern === 'film') {
           ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
           const holeH = 14;
@@ -441,9 +504,8 @@ const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
           }
         }
 
-        // Render Foto dengan Potongan Bentuk
         for (let i = 0; i < renderPhotos.length; i++) {
-          const img = new (window as any).Image();
+          const img = document.createElement('img');
           img.src = renderPhotos[i];
           await new Promise((resolve) => {
             img.onload = resolve;
@@ -531,7 +593,6 @@ const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
           ctx.stroke();
         }
 
-        // Garis Pembatas Bawah
         const footerStartY = totalHeight - footerHeight;
         ctx.strokeStyle = template.border;
         ctx.lineWidth = 1.5;
@@ -540,11 +601,10 @@ const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
         ctx.lineTo(stripWidth - padding - 20, footerStartY + 10);
         ctx.stroke();
 
-        // Logo Dekatan
         const darkColors = ['#18181B', '#232931', '#450A0A', '#0F172A', '#DA6868'];
         const isDarkTheme = (template as any)?.isDark || darkColors.includes(template.bg);
 
-        const logoImg = new (window as any).Image();
+        const logoImg = document.createElement('img');
         logoImg.src = isDarkTheme ? '/dekatan-white.png' : '/dekatan1.png';
         await new Promise((resolve) => {
           logoImg.onload = resolve;
@@ -562,7 +622,6 @@ const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
           ctx.drawImage(logoImg, logoX, logoY, logoWidth, logoHeight);
         }
 
-        // Tanggal dan Teks Footer
         const now = new Date();
         const formattedDate = now.toLocaleDateString('id-ID', {
           day: 'numeric',
@@ -593,7 +652,6 @@ const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
         ctx.fillStyle = template.textColor;
         ctx.fillText(template.labelFooter || 'DEKATAN PHOTOBOOTH', stripWidth / 2, currentTextY + 20);
 
-        // Stiker Digital
         if (stickersToDraw && stickersToDraw.length > 0) {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -667,7 +725,7 @@ const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
     }
   };
 
-  // Stiker Controls
+  // Kontrol Stiker
   const handleAddSticker = (emoji: string) => {
     const newId = `${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
     const newSticker: PlacedSticker = {
@@ -1062,7 +1120,13 @@ const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
           <div
             ref={previewContainerRef}
             onClick={() => setSelectedStickerId(null)}
-            className="relative select-none p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 touch-pan-y max-w-[280px]"
+            className={`relative select-none p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 touch-pan-y ${
+              selectedLayout === 'grid'
+                ? 'max-w-[320px]'
+                : selectedLayout === 'strip3'
+                ? 'max-w-[250px]'
+                : 'max-w-[270px]'
+            }`}
           >
             {/* eslint-disable-next-html-element/no-img-element */}
             <img
