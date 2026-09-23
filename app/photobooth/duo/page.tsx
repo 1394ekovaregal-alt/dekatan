@@ -17,6 +17,11 @@ import {
   Palette,
   Play,
   SlidersHorizontal,
+  Crop,
+  Undo2,
+  Redo2,
+  Move,
+  RotateCcw,
   Maximize2,
   ZoomIn,
   ZoomOut,
@@ -56,7 +61,20 @@ const NOTE_COLORS = [
   { id: 'lavender', name: 'Lilac', value: '#8B5CF6' },
 ] as const;
 
-// Fungsi Bantu: Memindai Lubang Transparan Otomatis dari Gambar Frame PNG
+export interface PhotoAdjustment {
+  panX: number;
+  panY: number;
+  zoom: number;
+}
+
+const DEFAULT_ADJUSTMENTS: PhotoAdjustment[] = [
+  { panX: 0, panY: 0, zoom: 1 },
+  { panX: 0, panY: 0, zoom: 1 },
+  { panX: 0, panY: 0, zoom: 1 },
+  { panX: 0, panY: 0, zoom: 1 },
+];
+
+// Deteksi Lubang Transparan Otomatis pada PNG Bingkai
 const detectPhotoSlots = (
   img: HTMLImageElement,
   targetW: number,
@@ -106,13 +124,10 @@ const detectPhotoSlots = (
     return verticalSegments.map((seg) => {
       const midY = Math.round((seg.startY + seg.endY) / 2);
       let leftX = centerX;
-      while (leftX > 10 && getAlpha(leftX, midY) < 100) {
-        leftX--;
-      }
+      while (leftX > 10 && getAlpha(leftX, midY) < 100) leftX--;
       let rightX = centerX;
-      while (rightX < targetW - 10 && getAlpha(rightX, midY) < 100) {
-        rightX++;
-      }
+      while (rightX < targetW - 10 && getAlpha(rightX, midY) < 100) rightX++;
+
       const w = rightX - leftX;
       const h = seg.endY - seg.startY;
       return {
@@ -160,7 +175,27 @@ export default function DuoPhotobooth() {
   const [selectedFilter, setSelectedFilter] = useState<PhotoFilterKey>('normal');
   const selectedFilterRef = useRef<PhotoFilterKey>('normal');
 
-  // Catatan, Font, Warna, Susunan, & Posisi Jari (Sinkron Dua Arah)
+  // Tab Menu Pratinjau
+  const [activeTab, setActiveTab] = useState<'filter' | 'crop'>('filter');
+
+  // Penyesuaian Foto, Crop, & Riwayat Undo/Redo
+  const [photoAdjustments, setPhotoAdjustments] = useState<PhotoAdjustment[]>(DEFAULT_ADJUSTMENTS);
+  const photoAdjustmentsRef = useRef<PhotoAdjustment[]>(DEFAULT_ADJUSTMENTS);
+  const [history, setHistory] = useState<PhotoAdjustment[][]>([DEFAULT_ADJUSTMENTS]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number>(0);
+  const [renderedSlots, setRenderedSlots] = useState<{ xPct: number; yPct: number; wPct: number; hPct: number }[]>([]);
+
+  // Dragging Foto Manual
+  const [dragPhotoState, setDragPhotoState] = useState<{
+    index: number;
+    startX: number;
+    startY: number;
+    initialPanX: number;
+    initialPanY: number;
+  } | null>(null);
+
+  // Catatan, Font, Warna, Susunan, & Posisi Jari
   const [customNote, setCustomNote] = useState<string>('');
   const customNoteRef = useRef<string>('');
   const [noteFont, setNoteFont] = useState<string>('sans-serif');
@@ -232,14 +267,16 @@ export default function DuoPhotobooth() {
     notePosRef.current = notePos;
   }, [notePos]);
 
+  useEffect(() => {
+    photoAdjustmentsRef.current = photoAdjustments;
+  }, [photoAdjustments]);
+
   const initAudio = useCallback(() => {
     if (!audioCtxRef.current) {
       const AudioCtx =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (AudioCtx) {
-        audioCtxRef.current = new AudioCtx();
-      }
+      if (AudioCtx) audioCtxRef.current = new AudioCtx();
     }
     if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
       audioCtxRef.current.resume().catch(() => {});
@@ -264,7 +301,6 @@ export default function DuoPhotobooth() {
 
     window.addEventListener('click', unlockAudio);
     window.addEventListener('touchstart', unlockAudio);
-
     return () => {
       window.removeEventListener('click', unlockAudio);
       window.removeEventListener('touchstart', unlockAudio);
@@ -297,9 +333,8 @@ export default function DuoPhotobooth() {
       const bufferSize = Math.floor(ctx.sampleRate * 0.1);
       const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
-      }
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
       const noise = ctx.createBufferSource();
       noise.buffer = buffer;
       const filter = ctx.createBiquadFilter();
@@ -340,10 +375,7 @@ export default function DuoPhotobooth() {
           audio: { echoCancellation: true, noiseSuppression: true },
         });
       } catch {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
-        });
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       }
 
       localStreamRef.current = stream;
@@ -381,7 +413,8 @@ export default function DuoPhotobooth() {
       currentFont: string = noteFontRef.current,
       currentColor: string = noteColorRef.current,
       currentAlign: TextAlign = noteAlignRef.current,
-      currentPos: { x: number; y: number; scale: number } = notePosRef.current
+      currentPos: { x: number; y: number; scale: number } = notePosRef.current,
+      adjustments: PhotoAdjustment[] = photoAdjustmentsRef.current
     ) => {
       setIsGeneratingStrip(true);
       const canvas = document.createElement('canvas');
@@ -408,22 +441,32 @@ export default function DuoPhotobooth() {
         y: number,
         w: number,
         h: number,
-        radius: number = 0
+        radius: number = 0,
+        adj: PhotoAdjustment = { panX: 0, panY: 0, zoom: 1 }
       ) => {
         const imgRatio = img.width / img.height;
         const targetRatio = w / h;
-        let sx = 0;
-        let sy = 0;
-        let sWidth = img.width;
-        let sHeight = img.height;
+        let baseW = img.width;
+        let baseH = img.height;
 
         if (imgRatio > targetRatio) {
-          sWidth = img.height * targetRatio;
-          sx = (img.width - sWidth) / 2;
+          baseW = img.height * targetRatio;
         } else {
-          sHeight = img.width / targetRatio;
-          sy = (img.height - sHeight) / 2;
+          baseH = img.width / targetRatio;
         }
+
+        const currentZoom = Math.max(1, adj.zoom || 1);
+        const sWidth = baseW / currentZoom;
+        const sHeight = baseH / currentZoom;
+
+        const defaultSx = (img.width - sWidth) / 2;
+        const defaultSy = (img.height - sHeight) * 0.18;
+
+        const maxPanX = (img.width - sWidth) / 2;
+        const maxPanY = (img.height - sHeight) / 2;
+
+        const sx = Math.max(0, Math.min(img.width - sWidth, defaultSx + adj.panX * maxPanX));
+        const sy = Math.max(0, Math.min(img.height - sHeight, defaultSy + adj.panY * maxPanY));
 
         ctx.save();
         if (radius > 0) {
@@ -436,14 +479,15 @@ export default function DuoPhotobooth() {
         ctx.restore();
       };
 
-      // ================= 1. JIKA MENGGUNAKAN TEMPLATE OVERLAY ADMIN =================
+      const calculatedSlots: { xPct: number; yPct: number; wPct: number; hPct: number }[] = [];
+
+      // ================= 1. TEMPLATE ADMIN (PNG OVERLAY) =================
       if (hasCustomOverlay && overlayImg && overlayImg.naturalWidth > 0) {
         const overlayRatio = overlayImg.naturalWidth / overlayImg.naturalHeight;
         const isStory916 = overlayRatio > 0.45;
 
         let W = 600;
         let H = Math.round(W / overlayRatio);
-
         if (isStory916) {
           W = 1080;
           H = 1920;
@@ -467,7 +511,15 @@ export default function DuoPhotobooth() {
             });
 
             const slot = autoSlots[i];
-            drawCoverImage(img, slot.x, slot.y, slot.width, slot.height, 4);
+            const adj = adjustments[i] || { panX: 0, panY: 0, zoom: 1 };
+            drawCoverImage(img, slot.x, slot.y, slot.width, slot.height, 4, adj);
+
+            calculatedSlots.push({
+              xPct: (slot.x / W) * 100,
+              yPct: (slot.y / H) * 100,
+              wPct: (slot.width / W) * 100,
+              hPct: (slot.height / H) * 100,
+            });
           }
         } else {
           const photoW = isStory916 ? 530 : 520;
@@ -484,11 +536,18 @@ export default function DuoPhotobooth() {
             });
 
             const y = startY + i * (photoH + gap);
-            drawCoverImage(img, posX, y, photoW, photoH, 6);
+            const adj = adjustments[i] || { panX: 0, panY: 0, zoom: 1 };
+            drawCoverImage(img, posX, y, photoW, photoH, 6, adj);
+
+            calculatedSlots.push({
+              xPct: (posX / W) * 100,
+              yPct: (y / H) * 100,
+              wPct: (photoW / W) * 100,
+              hPct: (photoH / H) * 100,
+            });
           }
         }
 
-        // Tempelkan Overlay Bingkai PNG di atas foto
         ctx.drawImage(overlayImg, 0, 0, W, H);
 
         // Watermark Resmi Dekatan (Logo & Tanggal)
@@ -520,10 +579,7 @@ export default function DuoPhotobooth() {
           year: 'numeric',
         });
         const formattedTime = now
-          .toLocaleTimeString('id-ID', {
-            hour: '2-digit',
-            minute: '2-digit',
-          })
+          .toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
           .replace(':', '.');
 
         const dateTextY = logoY + logoH + (isStory916 ? 24 : 16);
@@ -545,7 +601,7 @@ export default function DuoPhotobooth() {
           ctx.fillText(`“${note.trim()}”`, pixelX, pixelY);
         }
       } else {
-        // ================= 2. TEMPLATE STANDAR FREMIO (BAWAAN) =================
+        // ================= 2. TEMPLATE STANDAR =================
         const isGrid = layout === 'grid';
         const isStrip3 = layout === 'strip3';
         const padding = 32;
@@ -612,70 +668,15 @@ export default function DuoPhotobooth() {
             yPos = padding + i * (photoHeight + spacing);
           }
 
-          const imgRatio = img.width / img.height;
-          const targetRatio = photoWidth / photoHeight;
-          let sx = 0;
-          let sy = 0;
-          let sWidth = img.width;
-          let sHeight = img.height;
+          const adj = adjustments[i] || { panX: 0, panY: 0, zoom: 1 };
+          drawCoverImage(img, xPos, yPos, photoWidth, photoHeight, 8, adj);
 
-          if (imgRatio > targetRatio) {
-            sWidth = img.height * targetRatio;
-            sx = (img.width - sWidth) / 2;
-          } else {
-            sHeight = img.width / targetRatio;
-            sy = (img.height - sHeight) / 2;
-          }
-
-          ctx.save();
-          ctx.beginPath();
-          if (template.slotShape === 'arch') {
-            ctx.roundRect(xPos, yPos, photoWidth, photoHeight, [photoWidth / 2, photoWidth / 2, 8, 8]);
-          } else if (template.slotShape === 'rounded') {
-            ctx.roundRect(xPos, yPos, photoWidth, photoHeight, 16);
-          } else if (template.slotShape === 'heart') {
-            const topCurveHeight = photoHeight * 0.3;
-            ctx.moveTo(xPos + photoWidth / 2, yPos + photoHeight);
-            ctx.bezierCurveTo(
-              xPos,
-              yPos + photoHeight * 0.7,
-              xPos,
-              yPos + topCurveHeight,
-              xPos + photoWidth / 4,
-              yPos
-            );
-            ctx.bezierCurveTo(
-              xPos + photoWidth / 2,
-              yPos,
-              xPos + photoWidth / 2,
-              yPos + topCurveHeight,
-              xPos + photoWidth / 2,
-              yPos + topCurveHeight
-            );
-            ctx.bezierCurveTo(
-              xPos + photoWidth / 2,
-              yPos + topCurveHeight,
-              xPos + photoWidth / 2,
-              yPos,
-              xPos + (photoWidth * 3) / 4,
-              yPos
-            );
-            ctx.bezierCurveTo(
-              xPos + photoWidth,
-              yPos + topCurveHeight,
-              xPos + photoWidth,
-              yPos + photoHeight * 0.7,
-              xPos + photoWidth / 2,
-              yPos + photoHeight
-            );
-          } else {
-            ctx.rect(xPos, yPos, photoWidth, photoHeight);
-          }
-          ctx.clip();
-
-          ctx.filter = PHOTO_FILTERS[filterKey].filter;
-          ctx.drawImage(img, sx, sy, sWidth, sHeight, xPos, yPos, photoWidth, photoHeight);
-          ctx.restore();
+          calculatedSlots.push({
+            xPct: (xPos / stripWidth) * 100,
+            yPct: (yPos / totalHeight) * 100,
+            wPct: (photoWidth / stripWidth) * 100,
+            hPct: (photoHeight / totalHeight) * 100,
+          });
 
           ctx.strokeStyle = template.slotBorder;
           ctx.lineWidth = 2.5;
@@ -718,10 +719,7 @@ export default function DuoPhotobooth() {
           year: 'numeric',
         });
         const formattedTime = now
-          .toLocaleTimeString('id-ID', {
-            hour: '2-digit',
-            minute: '2-digit',
-          })
+          .toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
           .replace(':', '.');
 
         const currentTextY = logoY + logoHeight + 24;
@@ -747,12 +745,169 @@ export default function DuoPhotobooth() {
         }
       }
 
+      setRenderedSlots(calculatedSlots);
       const dataUrl = canvas.toDataURL('image/png');
       setFinalStripUrl(dataUrl);
       setIsGeneratingStrip(false);
     },
     []
   );
+
+  // Fungsi Kelola Riwayat Undo & Redo (Tersinkron Berdua)
+  const commitAdjustment = (newAdjustments: PhotoAdjustment[], broadcast: boolean = true) => {
+    const updatedHistory = history.slice(0, historyIndex + 1);
+    updatedHistory.push(newAdjustments);
+    setHistory(updatedHistory);
+    setHistoryIndex(updatedHistory.length - 1);
+    setPhotoAdjustments(newAdjustments);
+    photoAdjustmentsRef.current = newAdjustments;
+
+    if (capturedPhotos.length > 0) {
+      generateDuoStrip(
+        capturedPhotos,
+        selectedTemplate,
+        selectedFilter,
+        customNote,
+        selectedLayout,
+        noteFont,
+        noteColor,
+        noteAlign,
+        notePos,
+        newAdjustments
+      );
+    }
+
+    if (broadcast && connRef.current) {
+      connRef.current.send({ type: 'ADJUSTMENTS_CHANGE', adjustments: newAdjustments });
+    }
+  };
+
+  const handleUndo = () => {
+    if (historyIndex > 0) {
+      const targetIndex = historyIndex - 1;
+      setHistoryIndex(targetIndex);
+      const targetState = history[targetIndex];
+      setPhotoAdjustments(targetState);
+      photoAdjustmentsRef.current = targetState;
+
+      if (capturedPhotos.length > 0) {
+        generateDuoStrip(
+          capturedPhotos,
+          selectedTemplate,
+          selectedFilter,
+          customNote,
+          selectedLayout,
+          noteFont,
+          noteColor,
+          noteAlign,
+          notePos,
+          targetState
+        );
+      }
+      if (connRef.current) {
+        connRef.current.send({ type: 'ADJUSTMENTS_CHANGE', adjustments: targetState });
+      }
+    }
+  };
+
+  const handleRedo = () => {
+    if (historyIndex < history.length - 1) {
+      const targetIndex = historyIndex + 1;
+      setHistoryIndex(targetIndex);
+      const targetState = history[targetIndex];
+      setPhotoAdjustments(targetState);
+      photoAdjustmentsRef.current = targetState;
+
+      if (capturedPhotos.length > 0) {
+        generateDuoStrip(
+          capturedPhotos,
+          selectedTemplate,
+          selectedFilter,
+          customNote,
+          selectedLayout,
+          noteFont,
+          noteColor,
+          noteAlign,
+          notePos,
+          targetState
+        );
+      }
+      if (connRef.current) {
+        connRef.current.send({ type: 'ADJUSTMENTS_CHANGE', adjustments: targetState });
+      }
+    }
+  };
+
+  const handleResetSlot = (index: number) => {
+    const updated = photoAdjustments.map((adj, i) =>
+      i === index ? { panX: 0, panY: 0, zoom: 1 } : adj
+    );
+    commitAdjustment(updated);
+  };
+
+  const handleZoomChange = (index: number, step: number) => {
+    const current = photoAdjustments[index] || { panX: 0, panY: 0, zoom: 1 };
+    const nextZoom = Math.max(1, Math.min(2.5, Number((current.zoom + step).toFixed(2))));
+    const updated = photoAdjustments.map((adj, i) =>
+      i === index ? { ...adj, zoom: nextZoom } : adj
+    );
+    commitAdjustment(updated);
+  };
+
+  // Drag Gesture pada Masing-Masing Foto Duo
+  const handlePhotoDragStart = (e: React.PointerEvent, index: number) => {
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    setSelectedPhotoIndex(index);
+    const current = photoAdjustments[index] || { panX: 0, panY: 0, zoom: 1 };
+    setDragPhotoState({
+      index,
+      startX: e.clientX,
+      startY: e.clientY,
+      initialPanX: current.panX,
+      initialPanY: current.panY,
+    });
+  };
+
+  const handlePhotoDragMove = (e: React.PointerEvent) => {
+    if (!dragPhotoState) return;
+    e.stopPropagation();
+    const deltaX = (e.clientX - dragPhotoState.startX) * 0.008;
+    const deltaY = (e.clientY - dragPhotoState.startY) * 0.008;
+
+    const newPanX = Math.max(-1, Math.min(1, dragPhotoState.initialPanX - deltaX));
+    const newPanY = Math.max(-1, Math.min(1, dragPhotoState.initialPanY - deltaY));
+
+    const updated = photoAdjustments.map((adj, i) =>
+      i === dragPhotoState.index ? { ...adj, panX: newPanX, panY: newPanY } : adj
+    );
+    setPhotoAdjustments(updated);
+    photoAdjustmentsRef.current = updated;
+
+    if (capturedPhotos.length > 0) {
+      generateDuoStrip(
+        capturedPhotos,
+        selectedTemplate,
+        selectedFilter,
+        customNote,
+        selectedLayout,
+        noteFont,
+        noteColor,
+        noteAlign,
+        notePos,
+        updated
+      );
+    }
+  };
+
+  const handlePhotoDragEnd = (e: React.PointerEvent) => {
+    if (!dragPhotoState) return;
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch (_) {}
+    commitAdjustment(photoAdjustments);
+    setDragPhotoState(null);
+  };
 
   const captureDuoFrame = (): string => {
     const localVideo = localVideoRef.current;
@@ -821,6 +976,10 @@ export default function DuoPhotobooth() {
     setIsCapturing(true);
     setCapturedPhotos([]);
     setFinalStripUrl(null);
+    setPhotoAdjustments(DEFAULT_ADJUSTMENTS);
+    photoAdjustmentsRef.current = DEFAULT_ADJUSTMENTS;
+    setHistory([DEFAULT_ADJUSTMENTS]);
+    setHistoryIndex(0);
 
     const tempPhotos: string[] = [];
     const totalShots = selectedLayoutRef.current === 'strip3' ? 3 : 4;
@@ -858,10 +1017,12 @@ export default function DuoPhotobooth() {
       noteFontRef.current,
       noteColorRef.current,
       noteAlignRef.current,
-      notePosRef.current
+      notePosRef.current,
+      DEFAULT_ADJUSTMENTS
     );
   }, [initAudio, playBeepSound, playShutterSound, generateDuoStrip]);
 
+  // Sinkronisasi Sinyal Dua Arah Antar-Perangkat
   const setupDataConnection = useCallback(
     (conn: DataConnection) => {
       conn.on('open', () => {
@@ -888,7 +1049,8 @@ export default function DuoPhotobooth() {
               noteFontRef.current,
               noteColorRef.current,
               noteAlignRef.current,
-              notePosRef.current
+              notePosRef.current,
+              photoAdjustmentsRef.current
             );
           }
         } else if (data?.type === 'TEMPLATE_CHANGE' && data?.template) {
@@ -904,7 +1066,8 @@ export default function DuoPhotobooth() {
               noteFontRef.current,
               noteColorRef.current,
               noteAlignRef.current,
-              notePosRef.current
+              notePosRef.current,
+              photoAdjustmentsRef.current
             );
           }
         } else if (data?.type === 'FILTER_CHANGE' && data?.filter) {
@@ -920,7 +1083,8 @@ export default function DuoPhotobooth() {
               noteFontRef.current,
               noteColorRef.current,
               noteAlignRef.current,
-              notePosRef.current
+              notePosRef.current,
+              photoAdjustmentsRef.current
             );
           }
         } else if (data?.type === 'NOTE_CHANGE' && typeof data?.note === 'string') {
@@ -936,7 +1100,8 @@ export default function DuoPhotobooth() {
               noteFontRef.current,
               noteColorRef.current,
               noteAlignRef.current,
-              notePosRef.current
+              notePosRef.current,
+              photoAdjustmentsRef.current
             );
           }
         } else if (data?.type === 'FONT_CHANGE' && typeof data?.font === 'string') {
@@ -952,7 +1117,8 @@ export default function DuoPhotobooth() {
               data.font,
               noteColorRef.current,
               noteAlignRef.current,
-              notePosRef.current
+              notePosRef.current,
+              photoAdjustmentsRef.current
             );
           }
         } else if (data?.type === 'COLOR_CHANGE' && typeof data?.color === 'string') {
@@ -968,7 +1134,8 @@ export default function DuoPhotobooth() {
               noteFontRef.current,
               data.color,
               noteAlignRef.current,
-              notePosRef.current
+              notePosRef.current,
+              photoAdjustmentsRef.current
             );
           }
         } else if (data?.type === 'ALIGN_CHANGE' && data?.align) {
@@ -984,7 +1151,8 @@ export default function DuoPhotobooth() {
               noteFontRef.current,
               noteColorRef.current,
               data.align,
-              notePosRef.current
+              notePosRef.current,
+              photoAdjustmentsRef.current
             );
           }
         } else if (data?.type === 'POS_CHANGE' && data?.pos) {
@@ -1000,7 +1168,25 @@ export default function DuoPhotobooth() {
               noteFontRef.current,
               noteColorRef.current,
               noteAlignRef.current,
-              data.pos
+              data.pos,
+              photoAdjustmentsRef.current
+            );
+          }
+        } else if (data?.type === 'ADJUSTMENTS_CHANGE' && data?.adjustments) {
+          setPhotoAdjustments(data.adjustments);
+          photoAdjustmentsRef.current = data.adjustments;
+          if (capturedPhotosRef.current.length > 0) {
+            generateDuoStrip(
+              capturedPhotosRef.current,
+              selectedTemplateRef.current,
+              selectedFilterRef.current,
+              customNoteRef.current,
+              selectedLayoutRef.current,
+              noteFontRef.current,
+              noteColorRef.current,
+              noteAlignRef.current,
+              notePosRef.current,
+              data.adjustments
             );
           }
         }
@@ -1113,7 +1299,8 @@ export default function DuoPhotobooth() {
         noteFont,
         noteColor,
         noteAlign,
-        notePos
+        notePos,
+        photoAdjustments
       );
     }
     if (connRef.current) {
@@ -1134,7 +1321,8 @@ export default function DuoPhotobooth() {
         noteFont,
         noteColor,
         noteAlign,
-        notePos
+        notePos,
+        photoAdjustments
       );
     }
     if (connRef.current) {
@@ -1163,7 +1351,8 @@ export default function DuoPhotobooth() {
         noteFont,
         noteColor,
         noteAlign,
-        notePos
+        notePos,
+        photoAdjustments
       );
     }
     if (connRef.current) {
@@ -1184,7 +1373,8 @@ export default function DuoPhotobooth() {
         noteFont,
         noteColor,
         noteAlign,
-        notePos
+        notePos,
+        photoAdjustments
       );
     }
     if (connRef.current) {
@@ -1205,7 +1395,8 @@ export default function DuoPhotobooth() {
         fontFamily,
         noteColor,
         noteAlign,
-        notePos
+        notePos,
+        photoAdjustments
       );
     }
     if (connRef.current) {
@@ -1226,7 +1417,8 @@ export default function DuoPhotobooth() {
         noteFont,
         colorValue,
         noteAlign,
-        notePos
+        notePos,
+        photoAdjustments
       );
     }
     if (connRef.current) {
@@ -1247,7 +1439,8 @@ export default function DuoPhotobooth() {
         noteFont,
         noteColor,
         align,
-        notePos
+        notePos,
+        photoAdjustments
       );
     }
     if (connRef.current) {
@@ -1353,9 +1546,14 @@ export default function DuoPhotobooth() {
     setFinalStripUrl(null);
     setCapturedPhotos([]);
     setCurrentShot(0);
+    setPhotoAdjustments(DEFAULT_ADJUSTMENTS);
+    photoAdjustmentsRef.current = DEFAULT_ADJUSTMENTS;
+    setHistory([DEFAULT_ADJUSTMENTS]);
+    setHistoryIndex(0);
   };
 
   const totalShotsRequired = selectedLayout === 'strip3' ? 3 : 4;
+  const currentPhotoAdj = photoAdjustments[selectedPhotoIndex] || { panX: 0, panY: 0, zoom: 1 };
 
   return (
     <main className="min-h-screen bg-[#FAF7F2] text-[#264653] flex flex-col items-center px-4 py-5 md:py-8">
@@ -1575,27 +1773,138 @@ export default function DuoPhotobooth() {
             <span className="text-[11px] text-stone-400">Ubah Desain →</span>
           </button>
 
-          {/* Filter Bar */}
-          <div className="flex items-center justify-center gap-1.5 mb-3 bg-white px-3 py-2 rounded-2xl shadow-xs border border-stone-200 w-full">
-            <SlidersHorizontal className="w-3.5 h-3.5 text-stone-500 mr-1" />
-            {(Object.keys(PHOTO_FILTERS) as PhotoFilterKey[]).map((key) => {
-              const item = PHOTO_FILTERS[key];
-              const isSelected = selectedFilter === key;
-              return (
-                <button
-                  key={key}
-                  onClick={() => handleFilterChange(key)}
-                  className={`px-3 py-1 rounded-xl text-xs font-medium touch-manipulation transition-all ${
-                    isSelected
-                      ? 'bg-[#DA6868] text-white shadow-xs'
-                      : 'text-stone-600 hover:bg-stone-100'
-                  }`}
-                >
-                  {item.name}
-                </button>
-              );
-            })}
+          {/* Tab Filter | Atur Foto (Crop) */}
+          <div className="w-full bg-stone-200/70 p-1 rounded-2xl flex gap-1 mb-2.5">
+            <button
+              onClick={() => setActiveTab('filter')}
+              className={`flex-1 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+                activeTab === 'filter'
+                  ? 'bg-white text-stone-800 shadow-xs'
+                  : 'text-stone-600 hover:text-stone-800'
+              }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              Filter
+            </button>
+
+            <button
+              onClick={() => setActiveTab('crop')}
+              className={`flex-1 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+                activeTab === 'crop'
+                  ? 'bg-white text-[#DA6868] shadow-xs'
+                  : 'text-stone-600 hover:text-stone-800'
+              }`}
+            >
+              <Crop className="w-3.5 h-3.5" />
+              Atur Foto Berdua
+            </button>
           </div>
+
+          {/* Tab 1: Filter Bar */}
+          {activeTab === 'filter' && (
+            <div className="flex items-center justify-center gap-1.5 mb-3 bg-white px-3 py-2 rounded-2xl shadow-xs border border-stone-200 w-full animate-fade-in">
+              <SlidersHorizontal className="w-3.5 h-3.5 text-stone-500 mr-1" />
+              {(Object.keys(PHOTO_FILTERS) as PhotoFilterKey[]).map((key) => {
+                const item = PHOTO_FILTERS[key];
+                const isSelected = selectedFilter === key;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => handleFilterChange(key)}
+                    className={`px-3 py-1 rounded-xl text-xs font-medium touch-manipulation transition-all ${
+                      isSelected
+                        ? 'bg-[#DA6868] text-white shadow-xs'
+                        : 'text-stone-600 hover:bg-stone-100'
+                    }`}
+                  >
+                    {item.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Tab 2: Penyesuaian Foto Duo (Crop, Geser, Undo & Redo) */}
+          {activeTab === 'crop' && (
+            <div className="w-full bg-white p-3.5 rounded-2xl shadow-xs border border-stone-200 mb-3 animate-fade-in">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-semibold text-stone-600">
+                  Pilih foto & geser posisi wajah:
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={handleUndo}
+                    disabled={historyIndex === 0}
+                    className="p-1.5 rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                    title="Undo"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={handleRedo}
+                    disabled={historyIndex >= history.length - 1}
+                    className="p-1.5 rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                    title="Redo"
+                  >
+                    <Redo2 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => handleResetSlot(selectedPhotoIndex)}
+                    className="p-1.5 rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition"
+                    title="Reset Posisi Foto Ini"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Pemilih Kotak Foto 1-4 */}
+              <div className="grid grid-cols-4 gap-1.5 mb-3">
+                {capturedPhotos.map((_, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setSelectedPhotoIndex(idx)}
+                    className={`py-1.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 border ${
+                      selectedPhotoIndex === idx
+                        ? 'bg-rose-50 text-[#DA6868] border-[#DA6868]'
+                        : 'bg-stone-50 text-stone-600 border-stone-100 hover:bg-stone-100'
+                    }`}
+                  >
+                    <span>Foto {idx + 1}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Pengaturan Zoom / Crop */}
+              <div className="flex items-center justify-between bg-stone-50 p-2 rounded-xl border border-stone-150">
+                <div className="flex items-center gap-1.5">
+                  <Move className="w-3.5 h-3.5 text-stone-500" />
+                  <span className="text-xs font-semibold text-stone-700">
+                    Zoom: {Math.round(currentPhotoAdj.zoom * 100)}%
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => handleZoomChange(selectedPhotoIndex, -0.15)}
+                    className="p-1.5 bg-white text-stone-700 rounded-lg border border-stone-200 hover:bg-stone-50 active:scale-95 transition"
+                    title="Perkecil"
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => handleZoomChange(selectedPhotoIndex, 0.15)}
+                    className="p-1.5 bg-white text-stone-700 rounded-lg border border-stone-200 hover:bg-stone-50 active:scale-95 transition"
+                    title="Perbesar"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+              <p className="text-[10px] text-stone-400 mt-2 text-center">
+                Sentuh dan tarik foto di kotak bingkai di bawah untuk menggeser posisi berdua.
+              </p>
+            </div>
+          )}
 
           {/* Kotak Pengaturan Catatan Interaktif Berdua */}
           <div className="w-full bg-white p-3.5 rounded-2xl shadow-xs border border-stone-200 mb-3">
@@ -1730,7 +2039,37 @@ export default function DuoPhotobooth() {
             }`}
           >
             {/* eslint-disable-next-html-element/no-img-element */}
-            <img src={finalStripUrl} alt="Hasil Foto Berdua" className="w-full h-auto rounded-lg shadow-inner" />
+            <img src={finalStripUrl} alt="Hasil Foto Berdua" className="w-full h-auto rounded-lg shadow-inner pointer-events-none select-none touch-pan-y" />
+
+            {/* Area Sentuh Interaktif untuk Menggeser Masing-Masing Foto (Aktif saat tab Atur Foto dibuka) */}
+            {activeTab === 'crop' &&
+              renderedSlots.map((slot, idx) => {
+                const isSelected = selectedPhotoIndex === idx;
+                return (
+                  <div
+                    key={idx}
+                    onPointerDown={(e) => handlePhotoDragStart(e, idx)}
+                    onPointerMove={handlePhotoDragMove}
+                    onPointerUp={handlePhotoDragEnd}
+                    onPointerCancel={handlePhotoDragEnd}
+                    style={{
+                      left: `${slot.xPct}%`,
+                      top: `${slot.yPct}%`,
+                      width: `${slot.wPct}%`,
+                      height: `${slot.hPct}%`,
+                    }}
+                    className={`absolute cursor-grab active:cursor-grabbing touch-none flex items-center justify-center transition-all ${
+                      isSelected
+                        ? 'border-2 border-dashed border-[#DA6868] bg-rose-500/10 z-25'
+                        : 'border border-dashed border-white/40 bg-black/5 hover:border-[#DA6868]/60 z-20'
+                    }`}
+                  >
+                    <span className="bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md pointer-events-none backdrop-blur-xs">
+                      Foto {idx + 1}
+                    </span>
+                  </div>
+                );
+              })}
 
             {/* Catatan Singkat Bebas Geser Dua Arah */}
             {customNote.trim() && (
@@ -1752,8 +2091,6 @@ export default function DuoPhotobooth() {
                 }`}
               >
                 <span className="font-semibold text-xs leading-none">“{customNote}”</span>
-
-                {/* Tuas Geser Skala */}
                 <div
                   onPointerDown={handleNoteResizeDown}
                   onPointerMove={handleNoteResizeMove}
