@@ -258,77 +258,31 @@ export default function SoloPhotobooth() {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const isGrid = layout === 'grid';
-      const isStrip3 = layout === 'strip3';
-      const padding = 32;
-      const spacing = 18;
-      const footerHeight = note.trim() ? 235 : 195;
+const hasCustomOverlay = Boolean((template as any)?.overlayUrl);
+    let overlayImg: HTMLImageElement | null = null;
 
-      let stripWidth = 560;
-      let photoWidth = 0;
-      let photoHeight = 0;
-      let totalHeight = 0;
+    if (hasCustomOverlay) {
+      const img = document.createElement('img');
+      img.crossOrigin = 'anonymous';
+      img.src = (template as any).overlayUrl;
+      await new Promise((resolve) => {
+        img.onload = resolve;
+        img.onerror = resolve;
+      });
+      overlayImg = img;
+    }
 
-      const photoCount = isStrip3 ? 3 : 4;
-      const renderPhotos = photos.slice(0, photoCount);
-
-      if (isGrid) {
-        stripWidth = 640;
-        photoWidth = Math.round((stripWidth - padding * 2 - spacing) / 2);
-        photoHeight = Math.round(photoWidth * (4 / 3));
-        totalHeight = padding * 2 + photoHeight * 2 + spacing + footerHeight;
-      } else if (isStrip3) {
-        stripWidth = 560;
-        photoWidth = stripWidth - padding * 2;
-        photoHeight = Math.round(photoWidth * (4 / 3));
-        totalHeight = padding * 2 + photoHeight * 3 + spacing * 2 + footerHeight;
-      } else {
-        stripWidth = 560;
-        photoWidth = stripWidth - padding * 2;
-        photoHeight = Math.round(photoWidth * (4 / 3));
-        totalHeight = padding * 2 + photoHeight * 4 + spacing * 3 + footerHeight;
-      }
-
-      canvas.width = stripWidth;
-      canvas.height = totalHeight;
-
-      // 1. Warna Dasar Bingkai
-      ctx.fillStyle = template.bg;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // 2. Corak Film
-      if (template.pattern === 'film') {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-        const holeH = 14;
-        const holeW = 8;
-        for (let y = 15; y < totalHeight - 20; y += 26) {
-          ctx.fillRect(6, y, holeW, holeH);
-          ctx.fillRect(stripWidth - 14, y, holeW, holeH);
-        }
-      }
-
-      // 3. Render Foto Pengguna dengan Potongan Bentuk
-      for (let i = 0; i < renderPhotos.length; i++) {
-        const img = new (window as any).Image();
-        img.src = renderPhotos[i];
-        await new Promise((resolve) => {
-          img.onload = resolve;
-        });
-
-        let xPos = padding;
-        let yPos = padding;
-
-        if (isGrid) {
-          const col = i % 2;
-          const row = Math.floor(i / 2);
-          xPos = padding + col * (photoWidth + spacing);
-          yPos = padding + row * (photoHeight + spacing);
-        } else {
-          yPos = padding + i * (photoHeight + spacing);
-        }
-
+      // Helper untuk menggambar foto dengan object-fit cover
+      const drawCoverImage = (
+        img: HTMLImageElement,
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        radius: number = 0
+      ) => {
         const imgRatio = img.width / img.height;
-        const targetRatio = photoWidth / photoHeight;
+        const targetRatio = w / h;
         let sx = 0;
         let sy = 0;
         let sWidth = img.width;
@@ -343,144 +297,313 @@ export default function SoloPhotobooth() {
         }
 
         ctx.save();
-        ctx.beginPath();
-        if (template.slotShape === 'arch') {
-          ctx.roundRect(xPos, yPos, photoWidth, photoHeight, [photoWidth / 2, photoWidth / 2, 8, 8]);
-        } else if (template.slotShape === 'rounded') {
-          ctx.roundRect(xPos, yPos, photoWidth, photoHeight, 16);
-        } else if (template.slotShape === 'heart') {
-          const topCurveHeight = photoHeight * 0.3;
-          ctx.moveTo(xPos + photoWidth / 2, yPos + photoHeight);
-          ctx.bezierCurveTo(
-            xPos,
-            yPos + photoHeight * 0.7,
-            xPos,
-            yPos + topCurveHeight,
-            xPos + photoWidth / 4,
-            yPos
-          );
-          ctx.bezierCurveTo(
-            xPos + photoWidth / 2,
-            yPos,
-            xPos + photoWidth / 2,
-            yPos + topCurveHeight,
-            xPos + photoWidth / 2,
-            yPos + topCurveHeight
-          );
-          ctx.bezierCurveTo(
-            xPos + photoWidth / 2,
-            yPos + topCurveHeight,
-            xPos + photoWidth / 2,
-            yPos,
-            xPos + (photoWidth * 3) / 4,
-            yPos
-          );
-          ctx.bezierCurveTo(
-            xPos + photoWidth,
-            yPos + topCurveHeight,
-            xPos + photoWidth,
-            yPos + photoHeight * 0.7,
-            xPos + photoWidth / 2,
-            yPos + photoHeight
-          );
-        } else {
-          ctx.rect(xPos, yPos, photoWidth, photoHeight);
+        if (radius > 0) {
+          ctx.beginPath();
+          ctx.roundRect(x, y, w, h, radius);
+          ctx.clip();
         }
-        ctx.clip();
-
         ctx.filter = PHOTO_FILTERS[filterKey].filter;
-        ctx.drawImage(img, sx, sy, sWidth, sHeight, xPos, yPos, photoWidth, photoHeight);
+        ctx.drawImage(img, sx, sy, sWidth, sHeight, x, y, w, h);
         ctx.restore();
+      };
 
-        ctx.strokeStyle = template.slotBorder;
-        ctx.lineWidth = 2.5;
+      // ================= 1. JIKA MENGGUNAKAN TEMPLATE OVERLAY ADMIN (ANTI-KETARIK) =================
+      if (hasCustomOverlay && overlayImg && overlayImg.naturalWidth > 0) {
+        const overlayRatio = overlayImg.naturalWidth / overlayImg.naturalHeight;
+        const isStory916 = overlayRatio > 0.45; // Rasio mendekati 9:16 (~0.56 seperti Y2K)
+
+        let W = 600;
+        let H = Math.round(W / overlayRatio); // Menjaga rasio 100% presisi
+
+        if (isStory916) {
+          W = 1080;
+          H = 1920;
+        }
+
+        canvas.width = W;
+        canvas.height = H;
+
+        // Latar belakang di balik area transparan
+        ctx.fillStyle = template.bg || '#FAF7F2';
+        ctx.fillRect(0, 0, W, H);
+
+        const renderPhotos = photos.slice(0, 4);
+
+        if (isStory916) {
+          // Format 9:16 Penuh (Y2K)
+          const photoW = 460;
+          const photoH = 345;
+          const posX = (W - photoW) / 2;
+          const startY = 240;
+          const gap = 45;
+
+          for (let i = 0; i < renderPhotos.length; i++) {
+            const img = new (window as any).Image();
+            img.src = renderPhotos[i];
+            await new Promise((resolve) => {
+              img.onload = resolve;
+            });
+
+            const y = startY + i * (photoH + gap);
+            drawCoverImage(img, posX, y, photoW, photoH, 12);
+          }
+        } else {
+          // Format 1:3 Ramping (Roll Film & Minimalist Floral)
+          const marginX = 40;
+          const photoW = W - marginX * 2; // 520px
+          const photoH = Math.round(photoW * 0.72); // ~374px
+          const startY = 55;
+          const gap = 30;
+
+          for (let i = 0; i < renderPhotos.length; i++) {
+            const img = new (window as any).Image();
+            img.src = renderPhotos[i];
+            await new Promise((resolve) => {
+              img.onload = resolve;
+            });
+
+            const y = startY + i * (photoH + gap);
+            drawCoverImage(img, marginX, y, photoW, photoH, 8);
+          }
+        }
+
+        // Tempelkan Overlay PNG di atas foto
+        ctx.drawImage(overlayImg, 0, 0, W, H);
+
+        // Tulis catatan kustom bila ada
+        if (note.trim()) {
+          ctx.font = '600 20px sans-serif';
+          ctx.fillStyle = (template as any)?.isDark ? '#FFFFFF' : '#DA6868';
+          ctx.textAlign = 'center';
+          ctx.fillText(`“${note.trim()}”`, W / 2, H - 40);
+        }
+
+        // Stiker Digital
+        if (stickersToDraw && stickersToDraw.length > 0) {
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          for (const stk of stickersToDraw) {
+            const pixelX = (stk.x / 100) * W;
+            const pixelY = (stk.y / 100) * H;
+            const dynamicFontSize = Math.round((isStory916 ? 56 : 38) * (stk.scale || 1));
+            ctx.font = `${dynamicFontSize}px sans-serif`;
+            ctx.fillText(stk.emoji, pixelX, pixelY);
+          }
+        }
+      } else {
+        // ================= 2. TEMPLATE STANDAR FREMIO (BAWAAN) =================
+        const isGrid = layout === 'grid';
+        const isStrip3 = layout === 'strip3';
+        const padding = 32;
+        const spacing = 18;
+        const footerHeight = note.trim() ? 235 : 195;
+
+        let stripWidth = 560;
+        let photoWidth = 0;
+        let photoHeight = 0;
+        let totalHeight = 0;
+
+        const photoCount = isStrip3 ? 3 : 4;
+        const renderPhotos = photos.slice(0, photoCount);
+
+        if (isGrid) {
+          stripWidth = 640;
+          photoWidth = Math.round((stripWidth - padding * 2 - spacing) / 2);
+          photoHeight = Math.round(photoWidth * (4 / 3));
+          totalHeight = padding * 2 + photoHeight * 2 + spacing + footerHeight;
+        } else if (isStrip3) {
+          stripWidth = 560;
+          photoWidth = stripWidth - padding * 2;
+          photoHeight = Math.round(photoWidth * (4 / 3));
+          totalHeight = padding * 2 + photoHeight * 3 + spacing * 2 + footerHeight;
+        } else {
+          stripWidth = 560;
+          photoWidth = stripWidth - padding * 2;
+          photoHeight = Math.round(photoWidth * (4 / 3));
+          totalHeight = padding * 2 + photoHeight * 4 + spacing * 3 + footerHeight;
+        }
+
+        canvas.width = stripWidth;
+        canvas.height = totalHeight;
+
+        // Warna Dasar Bingkai
+        ctx.fillStyle = template.bg;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Corak Film
+        if (template.pattern === 'film') {
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+          const holeH = 14;
+          const holeW = 8;
+          for (let y = 15; y < totalHeight - 20; y += 26) {
+            ctx.fillRect(6, y, holeW, holeH);
+            ctx.fillRect(stripWidth - 14, y, holeW, holeH);
+          }
+        }
+
+        // Render Foto dengan Potongan Bentuk
+        for (let i = 0; i < renderPhotos.length; i++) {
+          const img = new (window as any).Image();
+          img.src = renderPhotos[i];
+          await new Promise((resolve) => {
+            img.onload = resolve;
+          });
+
+          let xPos = padding;
+          let yPos = padding;
+
+          if (isGrid) {
+            const col = i % 2;
+            const row = Math.floor(i / 2);
+            xPos = padding + col * (photoWidth + spacing);
+            yPos = padding + row * (photoHeight + spacing);
+          } else {
+            yPos = padding + i * (photoHeight + spacing);
+          }
+
+          const imgRatio = img.width / img.height;
+          const targetRatio = photoWidth / photoHeight;
+          let sx = 0;
+          let sy = 0;
+          let sWidth = img.width;
+          let sHeight = img.height;
+
+          if (imgRatio > targetRatio) {
+            sWidth = img.height * targetRatio;
+            sx = (img.width - sWidth) / 2;
+          } else {
+            sHeight = img.width / targetRatio;
+            sy = (img.height - sHeight) / 2;
+          }
+
+          ctx.save();
+          ctx.beginPath();
+          if (template.slotShape === 'arch') {
+            ctx.roundRect(xPos, yPos, photoWidth, photoHeight, [photoWidth / 2, photoWidth / 2, 8, 8]);
+          } else if (template.slotShape === 'rounded') {
+            ctx.roundRect(xPos, yPos, photoWidth, photoHeight, 16);
+          } else if (template.slotShape === 'heart') {
+            const topCurveHeight = photoHeight * 0.3;
+            ctx.moveTo(xPos + photoWidth / 2, yPos + photoHeight);
+            ctx.bezierCurveTo(
+              xPos,
+              yPos + photoHeight * 0.7,
+              xPos,
+              yPos + topCurveHeight,
+              xPos + photoWidth / 4,
+              yPos
+            );
+            ctx.bezierCurveTo(
+              xPos + photoWidth / 2,
+              yPos,
+              xPos + photoWidth / 2,
+              yPos + topCurveHeight,
+              xPos + photoWidth / 2,
+              yPos + topCurveHeight
+            );
+            ctx.bezierCurveTo(
+              xPos + photoWidth / 2,
+              yPos + topCurveHeight,
+              xPos + photoWidth / 2,
+              yPos,
+              xPos + (photoWidth * 3) / 4,
+              yPos
+            );
+            ctx.bezierCurveTo(
+              xPos + photoWidth,
+              yPos + topCurveHeight,
+              xPos + photoWidth,
+              yPos + photoHeight * 0.7,
+              xPos + photoWidth / 2,
+              yPos + photoHeight
+            );
+          } else {
+            ctx.rect(xPos, yPos, photoWidth, photoHeight);
+          }
+          ctx.clip();
+
+          ctx.filter = PHOTO_FILTERS[filterKey].filter;
+          ctx.drawImage(img, sx, sy, sWidth, sHeight, xPos, yPos, photoWidth, photoHeight);
+          ctx.restore();
+
+          ctx.strokeStyle = template.slotBorder;
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+        }
+
+        // Garis Pembatas Bawah
+        const footerStartY = totalHeight - footerHeight;
+        ctx.strokeStyle = template.border;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(padding + 20, footerStartY + 10);
+        ctx.lineTo(stripWidth - padding - 20, footerStartY + 10);
         ctx.stroke();
-      }
 
-      // 4. Tumpukan Gambar PNG Transparan (Jika Template dari Admin)
-      if ((template as any)?.overlayUrl) {
-        const overlayImg = new (window as any).Image();
-        overlayImg.crossOrigin = 'anonymous';
-        overlayImg.src = (template as any).overlayUrl;
+        // Logo Dekatan
+        const darkColors = ['#18181B', '#232931', '#450A0A', '#0F172A', '#DA6868'];
+        const isDarkTheme = (template as any)?.isDark || darkColors.includes(template.bg);
+
+        const logoImg = new (window as any).Image();
+        logoImg.src = isDarkTheme ? '/dekatan-white.png' : '/dekatan1.png';
         await new Promise((resolve) => {
-          overlayImg.onload = resolve;
-          overlayImg.onerror = resolve;
+          logoImg.onload = resolve;
+          logoImg.onerror = resolve;
         });
-        ctx.drawImage(overlayImg, 0, 0, stripWidth, totalHeight);
-      }
 
-      // 5. Garis Pembatas Bawah
-      const footerStartY = totalHeight - footerHeight;
-      ctx.strokeStyle = template.border;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(padding + 20, footerStartY + 10);
-      ctx.lineTo(stripWidth - padding - 20, footerStartY + 10);
-      ctx.stroke();
+        const logoWidth = 180;
+        const logoHeight = logoImg.naturalHeight
+          ? (logoImg.naturalHeight / logoImg.naturalWidth) * logoWidth
+          : 50;
+        const logoX = (stripWidth - logoWidth) / 2;
+        const logoY = footerStartY + 25;
 
-      // 6. Logo Dekatan (Otomatis Putih Bersih pada Tema Gelap)
-      const darkColors = ['#18181B', '#232931', '#450A0A', '#0F172A', '#DA6868'];
-      const isDarkTheme = (template as any)?.isDark || darkColors.includes(template.bg);
+        if (logoImg.complete && logoImg.naturalWidth !== 0) {
+          ctx.drawImage(logoImg, logoX, logoY, logoWidth, logoHeight);
+        }
 
-     const logoImg = new (window as any).Image();
-      logoImg.src = isDarkTheme ? '/dekatan-white.png' : '/dekatan1.png';
-      await new Promise((resolve) => {
-        logoImg.onload = resolve;
-        logoImg.onerror = resolve;
-      });
+        // Tanggal dan Teks Footer
+        const now = new Date();
+        const formattedDate = now.toLocaleDateString('id-ID', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        });
+        const formattedTime = now.toLocaleTimeString('id-ID', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
 
-const logoWidth = 180;
-      const logoHeight = logoImg.naturalHeight
-        ? (logoImg.naturalHeight / logoImg.naturalWidth) * logoWidth
-        : 50;
-      const logoX = (stripWidth - logoWidth) / 2;
-      const logoY = footerStartY + 25;
+        let currentTextY = logoY + logoHeight + 24;
 
-      if (logoImg.complete && logoImg.naturalWidth !== 0) {
-        ctx.drawImage(logoImg, logoX, logoY, logoWidth, logoHeight);
-      }
+        if (note.trim()) {
+          ctx.font = '600 15px sans-serif';
+          ctx.fillStyle = '#DA6868';
+          ctx.textAlign = 'center';
+          ctx.fillText(`“${note.trim()}”`, stripWidth / 2, currentTextY);
+          currentTextY += 24;
+        }
 
-      // 7. Tanggal dan Teks Footer
-      const now = new Date();
-      const formattedDate = now.toLocaleDateString('id-ID', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      });
-      const formattedTime = now.toLocaleTimeString('id-ID', {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-
-      let currentTextY = logoY + logoHeight + 24;
-
-      if (note.trim()) {
-        ctx.font = '600 15px sans-serif';
-        ctx.fillStyle = '#DA6868';
+        ctx.font = '500 13px sans-serif';
+        ctx.fillStyle = template.subTextColor;
         ctx.textAlign = 'center';
-        ctx.fillText(`“${note.trim()}”`, stripWidth / 2, currentTextY);
-        currentTextY += 24;
-      }
+        ctx.fillText(`${formattedDate} • ${formattedTime} WITA`, stripWidth / 2, currentTextY);
 
-      ctx.font = '500 13px sans-serif';
-      ctx.fillStyle = template.subTextColor;
-      ctx.textAlign = 'center';
-      ctx.fillText(`${formattedDate} • ${formattedTime} WITA`, stripWidth / 2, currentTextY);
+        ctx.font = '700 12px sans-serif';
+        ctx.fillStyle = template.textColor;
+        ctx.fillText(template.labelFooter || 'DEKATAN PHOTOBOOTH', stripWidth / 2, currentTextY + 20);
 
-      ctx.font = '700 12px sans-serif';
-      ctx.fillStyle = template.textColor;
-      ctx.fillText(template.labelFooter || 'DEKATAN PHOTOBOOTH', stripWidth / 2, currentTextY + 20);
-
-      // 8. Stiker Digital
-      if (stickersToDraw && stickersToDraw.length > 0) {
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        for (const stk of stickersToDraw) {
-          const pixelX = (stk.x / 100) * stripWidth;
-          const pixelY = (stk.y / 100) * totalHeight;
-          const dynamicFontSize = Math.round(38 * (stk.scale || 1));
-          ctx.font = `${dynamicFontSize}px sans-serif`;
-          ctx.fillText(stk.emoji, pixelX, pixelY);
+        // Stiker Digital
+        if (stickersToDraw && stickersToDraw.length > 0) {
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          for (const stk of stickersToDraw) {
+            const pixelX = (stk.x / 100) * stripWidth;
+            const pixelY = (stk.y / 100) * totalHeight;
+            const dynamicFontSize = Math.round(38 * (stk.scale || 1));
+            ctx.font = `${dynamicFontSize}px sans-serif`;
+            ctx.fillText(stk.emoji, pixelX, pixelY);
+          }
         }
       }
 
@@ -749,7 +872,7 @@ const logoWidth = 180;
             )}
           </div>
 
-          {/* Tombol Pemilih Template Fremio */}
+          {/* Tombol Pemilih Template */}
           <button
             onClick={() => setIsTemplateModalOpen(true)}
             disabled={isCapturing}
@@ -935,17 +1058,11 @@ const logoWidth = 180;
             />
           </div>
 
-          {/* Pratinjau Kertas Strip (Dukungan Scroll Layar Penuh) */}
+          {/* Pratinjau Kertas Strip */}
           <div
             ref={previewContainerRef}
             onClick={() => setSelectedStickerId(null)}
-            className={`relative select-none p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 touch-pan-y ${
-              selectedLayout === 'grid'
-                ? 'max-w-[320px]'
-                : selectedLayout === 'strip3'
-                ? 'max-w-[250px]'
-                : 'max-w-[270px]'
-            }`}
+            className="relative select-none p-3 bg-white rounded-2xl shadow-2xl border border-stone-200 touch-pan-y max-w-[280px]"
           >
             {/* eslint-disable-next-html-element/no-img-element */}
             <img
@@ -1029,7 +1146,7 @@ const logoWidth = 180;
         </div>
       )}
 
-      {/* Modal Katalog Frame Fremio */}
+      {/* Modal Katalog Frame */}
       <TemplateSelectorModal
         isOpen={isTemplateModalOpen}
         onClose={() => setIsTemplateModalOpen(false)}
