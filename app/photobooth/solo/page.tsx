@@ -72,7 +72,6 @@ const detectPhotoSlots = (
     let inSlot = false;
     let startY = 0;
 
-    // Pindai dari atas ke bawah pada garis tengah kanvas
     for (let y = 10; y < targetH - 10; y++) {
       const a = getAlpha(centerX, y);
       const isTransparent = a < 90;
@@ -345,7 +344,6 @@ export default function SoloPhotobooth() {
         overlayImg = img;
       }
 
-      // Helper untuk menggambar foto dengan object-fit cover
       const drawCoverImage = (
         img: HTMLImageElement,
         x: number,
@@ -380,7 +378,7 @@ export default function SoloPhotobooth() {
         ctx.restore();
       };
 
-      // ================= 1. JIKA MENGGUNAKAN TEMPLATE OVERLAY ADMIN (ANTI-CELAH & ANTI-MELAR) =================
+      // ================= 1. JIKA MENGGUNAKAN TEMPLATE OVERLAY ADMIN =================
       if (hasCustomOverlay && overlayImg && overlayImg.naturalWidth > 0) {
         const overlayRatio = overlayImg.naturalWidth / overlayImg.naturalHeight;
         const isStory916 = overlayRatio > 0.45;
@@ -403,7 +401,6 @@ export default function SoloPhotobooth() {
         const autoSlots = detectPhotoSlots(overlayImg, W, H);
 
         if (autoSlots.length >= renderPhotos.length) {
-          // Posisi otomatis dari pemindaian lubang transparan
           for (let i = 0; i < renderPhotos.length; i++) {
             const img = document.createElement('img');
             img.src = renderPhotos[i];
@@ -415,7 +412,6 @@ export default function SoloPhotobooth() {
             drawCoverImage(img, slot.x, slot.y, slot.width, slot.height, 4);
           }
         } else {
-          // Cadangan jika kanvas tidak bisa membaca piksel (CORS terblokir)
           const photoW = isStory916 ? 530 : 520;
           const photoH = isStory916 ? 375 : 374;
           const posX = (W - photoW) / 2;
@@ -437,11 +433,33 @@ export default function SoloPhotobooth() {
         // Tempelkan Overlay Bingkai PNG di atas foto
         ctx.drawImage(overlayImg, 0, 0, W, H);
 
+        // Logo Dekatan di Bawah Kanvas
+        const darkColors = ['#18181B', '#232931', '#450A0A', '#0F172A', '#DA6868'];
+        const isDarkTheme = (template as any)?.isDark || darkColors.includes(template.bg);
+
+        const logoImg = document.createElement('img');
+        logoImg.src = isDarkTheme ? '/dekatan-white.png' : '/dekatan1.png';
+        await new Promise((resolve) => {
+          logoImg.onload = resolve;
+          logoImg.onerror = resolve;
+        });
+
+        const logoW = isStory916 ? 160 : 120;
+        const logoH = logoImg.naturalHeight
+          ? (logoImg.naturalHeight / logoImg.naturalWidth) * logoW
+          : 36;
+        const logoX = (W - logoW) / 2;
+        const logoY = H - logoH - (isStory916 ? 35 : 20);
+
+        if (logoImg.complete && logoImg.naturalWidth !== 0) {
+          ctx.drawImage(logoImg, logoX, logoY, logoW, logoH);
+        }
+
         if (note.trim()) {
-          ctx.font = '600 20px sans-serif';
-          ctx.fillStyle = (template as any)?.isDark ? '#FFFFFF' : '#DA6868';
+          ctx.font = '600 18px sans-serif';
+          ctx.fillStyle = isDarkTheme ? '#FFFFFF' : '#DA6868';
           ctx.textAlign = 'center';
-          ctx.fillText(`“${note.trim()}”`, W / 2, H - 40);
+          ctx.fillText(`“${note.trim()}”`, W / 2, logoY - 14);
         }
 
         if (stickersToDraw && stickersToDraw.length > 0) {
